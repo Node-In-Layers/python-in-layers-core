@@ -3,16 +3,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from box import Box
-
-from ..protocols import LayersServices, ServicesContext
+from ..protocols import ServicesContext
 
 
-def create() -> LayersServices:
-    def get_model_props(context: ServicesContext):
+class LayersServices:
+    def get_model_props(self, context: ServicesContext):
         raise NotImplementedError("Model support not implemented in Python port")
 
-    def load_layer(app: Mapping[str, Any], layer: str, context: Mapping[str, Any]):
+    def load_layer(self, app: Mapping[str, Any], layer: str, context: Mapping[str, Any]):
         constructor = app.get(layer)
         if not constructor or "create" not in constructor:
             return None
@@ -23,9 +21,5 @@ def create() -> LayersServices:
             )
         return instance
 
-    return Box(
-        {
-            "get_model_props": get_model_props,
-            "load_layer": load_layer,
-        }
-    )
+def create() -> LayersServices:
+    return LayersServices()

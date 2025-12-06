@@ -54,5 +54,4 @@ async def load_system(args: Mapping[str, Any]):
             del layers_loaded.services[layers_name]
     except Exception:  # noqa: S110
         pass
-    # Provide attribute access for nicer DX
-    return Box(layers_loaded)
+    return layers_loaded

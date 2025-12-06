@@ -40,7 +40,7 @@ def _config():
 def test_load_system_end_to_end():
     async def run():
         sys = await load_system({"environment": "test", "config": _config()})
-        assert sys["services"]["demo"]["ping"]("x")[0:5] == "pong:"
-        assert sys["features"]["demo"]["callPing"]("x")[0:5] == "pong:"
+        assert sys.services.demo.ping("x")[0:5] == "pong:"
+        assert sys.features.demo.callPing("x")[0:5] == "pong:"
 
     asyncio.run(run())

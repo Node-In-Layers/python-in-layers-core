@@ -12,14 +12,16 @@ from ..protocols import (
     CommonContext,
     CoreNamespace,
     FeaturesContext,
-    LayersFeatures,
 )
 
 
-def create(context: FeaturesContext) -> LayersFeatures:
+class LayersFeatures:
+    def __init__(self, context: FeaturesContext):
+        self.context = context
+
     def _get_layer_context(
-        common_context: Mapping[str, Any], layer: Mapping[str, Any] | None
-    ):
+        self, common_context: Mapping[str, Any], layer: Mapping[str, Any] | None
+    ) -> Mapping[str, Any]:
         if layer:
             merged = deepcopy(common_context)
             for k, v in layer.items():
@@ -27,15 +29,114 @@ def create(context: FeaturesContext) -> LayersFeatures:
             return merged
         return common_context
 
+    def _make_wrapped(self, f, logger_ids):
+        def _inner2(*args, **kwargs):  # noqa: ARG001
+            args_no_cross, cross = extract_cross_layer_props(list(args))
+            return f(
+                *args_no_cross,
+                cross or {"logging": {"ids": logger_ids}},
+            )
+
+        return _inner2
+
+    def _wrap_layer_functions(
+        self,
+        loaded_layer: Any,
+        layer_logger,
+        app_name: str,
+        layer: str,
+        ignore_layer_functions: Mapping[str, Any],
+    ):
+        def _iter_properties(obj: Any):
+            if isinstance(obj, Mapping):
+                for k, v in obj.items():
+                    yield k, v
+                return
+            # Fallback to attribute-based discovery on class instances
+            for name in dir(obj):
+                if name.startswith("_"):
+                    continue
+                try:  # noqa: SIM105
+                    attr = getattr(obj, name)
+                except Exception:  # noqa: S110
+                    continue
+                yield name, attr
+
+        out: dict[str, Any] = {}
+        for property_name, func in _iter_properties(loaded_layer):
+            if not callable(func):
+                out[property_name] = func
+                continue
+            function_level_key = f"{app_name}.{layer}.{property_name}"
+            if _get(ignore_layer_functions, function_level_key):
+                out[property_name] = func
+                continue
+
+            def _make_inner(f):
+                def _inner(log, *args, **kwargs):  # noqa: ARG001
+                    return f(*args, **kwargs)
+
+                return _inner
+
+            wrapped = layer_logger._log_wrap(property_name, _make_inner(func))
+            for attr in dir(func):
+                try:  # noqa: SIM105
+                    setattr(wrapped, attr, getattr(func, attr))
+                except Exception:  # noqa: S110
+                    pass
+            out[property_name] = wrapped
+        return out
+
+    async def _load_composite_layer(
+        self,
+        app: Mapping[str, Any],
+        composite_layers,
+        common_context: Mapping[str, Any],
+        previous_layer: Mapping[str, Any] | None,  # noqa: ARG001
+        anti_layers_fn,  # noqa: ARG001
+    ):
+        result = {}
+        for layer in composite_layers:
+            layer_logger = (
+                self.context.root_logger.get_logger(Box(common_context))
+                .get_app_logger(app["name"])
+                .get_layer_logger(layer)
+            )
+            the_context = dict(common_context)
+            the_context["log"] = layer_logger
+            wrapped_context = the_context
+            loaded = self.context.services[CoreNamespace.layers.value].load_layer(
+                app, layer, Box(wrapped_context)
+            )
+            if loaded:
+                ignore_layer_functions = (
+                    self.context.config[CoreNamespace.root.value].logging.get(
+                        "ignore_layer_functions"
+                    )
+                    or {}
+                )
+                layer_level_key = f"{app['name']}.{layer}"
+                should_ignore = _get(ignore_layer_functions, layer_level_key)
+                final_layer = (
+                    loaded
+                    if should_ignore
+                    else self._wrap_layer_functions(
+                        loaded, layer_logger, app["name"], layer, ignore_layer_functions
+                    )
+                )
+                result = {**result, layer: {app["name"]: final_layer}}
+        return result
+
     async def _load_layer(
+        self,
         app: Mapping[str, Any],
         current_layer: str,
         common_context: Mapping[str, Any],
         previous_layer: Mapping[str, Any] | None,
     ):
-        layer_context1 = _get_layer_context(common_context, previous_layer)
+        layer_context1 = self._get_layer_context(common_context, previous_layer)
         layer_logger = (
-            context.root_logger.get_logger(Box(layer_context1))
+            self.context.root_logger.get_logger(Box(layer_context1))
             .get_app_logger(app["name"])
             .get_layer_logger(current_layer)
         )
@@ -44,7 +145,7 @@ def create(context: FeaturesContext) -> LayersFeatures:
 
         logger_ids = layer_logger.get_ids()
         ignore_layer_functions = (
-            context.config[CoreNamespace.root.value].logging.get(
+            self.context.config[CoreNamespace.root.value].logging.get(
                 "ignore_layer_functions"
             )
             or {}
@@ -85,17 +186,7 @@ def create(context: FeaturesContext) -> LayersFeatures:
                         domain_data[property_name] = func
                         continue
 
-                    def _make_wrapped(f):
-                        def _inner2(*args, **kwargs):  # noqa: ARG001
-                            args_no_cross, cross = extract_cross_layer_props(list(args))
-                            return f(
-                                *args_no_cross,
-                                cross or {"logging": {"ids": logger_ids}},
-                            )
-
-                        return _inner2
-
-                    wrapped_func = _make_wrapped(func)
+                    wrapped_func = self._make_wrapped(func, logger_ids)
                     for attr in dir(func):
                         try:  # noqa: SIM105
                             setattr(wrapped_func, attr, getattr(func, attr))
@@ -105,7 +196,7 @@ def create(context: FeaturesContext) -> LayersFeatures:
                 final_layer_data[domain_key] = domain_data
             wrapped_context[layer_key] = final_layer_data
 
-        loaded = context.services[CoreNamespace.layers.value].load_layer(
+        loaded = self.context.services[CoreNamespace.layers.value].load_layer(
             app, current_layer, Box(wrapped_context)
         )
         if not loaded:
@@ -115,85 +206,14 @@ def create(context: FeaturesContext) -> LayersFeatures:
         final_layer = (
             loaded
             if should_ignore
-            else _wrap_layer_functions(
+            else self._wrap_layer_functions(
                 loaded, layer_logger, app["name"], current_layer, ignore_layer_functions
             )
         )
         return {current_layer: {app["name"]: final_layer}}
 
-    def _wrap_layer_functions(
-        loaded_layer: Mapping[str, Any],
-        layer_logger,
-        app_name: str,
-        layer: str,
-        ignore_layer_functions: Mapping[str, Any],
-    ):
-        out = {}
-        for property_name, func in loaded_layer.items():
-            if not callable(func):
-                out[property_name] = func
-                continue
-            function_level_key = f"{app_name}.{layer}.{property_name}"
-            if _get(ignore_layer_functions, function_level_key):
-                out[property_name] = func
-                continue
-
-            def _make_inner(f):
-                def _inner(log, *args, **kwargs):  # noqa: ARG001
-                    return f(*args, **kwargs)
-
-                return _inner
-
-            wrapped = layer_logger._log_wrap(property_name, _make_inner(func))
-            for attr in dir(func):
-                try:  # noqa: SIM105
-                    setattr(wrapped, attr, getattr(func, attr))
-                except Exception:  # noqa: S110
-                    pass
-            out[property_name] = wrapped
-        return out
-
-    async def _load_composite_layer(
-        app: Mapping[str, Any],
-        composite_layers,
-        common_context: Mapping[str, Any],
-        previous_layer: Mapping[str, Any] | None,  # noqa: ARG001
-        anti_layers_fn,  # noqa: ARG001
-    ):
-        result = {}
-        for layer in composite_layers:
-            layer_logger = (
-                context.root_logger.get_logger(Box(common_context))
-                .get_app_logger(app["name"])
-                .get_layer_logger(layer)
-            )
-            the_context = dict(common_context)
-            the_context["log"] = layer_logger
-            wrapped_context = the_context
-            loaded = context.services[CoreNamespace.layers.value].load_layer(
-                app, layer, Box(wrapped_context)
-            )
-            if loaded:
-                ignore_layer_functions = (
-                    context.config[CoreNamespace.root.value].logging.get(
-                        "ignore_layer_functions"
-                    )
-                    or {}
-                )
-                layer_level_key = f"{app['name']}.{layer}"
-                should_ignore = _get(ignore_layer_functions, layer_level_key)
-                final_layer = (
-                    loaded
-                    if should_ignore
-                    else _wrap_layer_functions(
-                        loaded, layer_logger, app["name"], layer, ignore_layer_functions
-                    )
-                )
-                result = {**result, layer: {app["name"]: final_layer}}
-        return result
-
-    async def load_layers():
-        layers_in_order = context.config[CoreNamespace.root.value].layer_order
+    async def load_layers(self):
+        layers_in_order = self.context.config[CoreNamespace.root.value].layer_order
         anti_layers = get_layers_unavailable(layers_in_order)
         core_layers_to_ignore = [
             f"services.{CoreNamespace.layers.value}",
@@ -201,10 +221,10 @@ def create(context: FeaturesContext) -> LayersFeatures:
             f"features.{CoreNamespace.layers.value}",
             f"features.{CoreNamespace.globals.value}",
         ]
-        starting_context: CommonContext = {k: v for k, v in context.items() if k not in core_layers_to_ignore}  # type: ignore[return-value]
+        starting_context: CommonContext = {k: v for k, v in self.context.items() if k not in core_layers_to_ignore}  # type: ignore[return-value]
         apps = (
-            context.config[CoreNamespace.root.value].get("apps")
-            or context.config[CoreNamespace.root.value].get("domains")
+            self.context.config[CoreNamespace.root.value].get("apps")
+            or self.context.config[CoreNamespace.root.value].get("domains")
             or []
         )
         existing_layers = starting_context
@@ -212,7 +232,7 @@ def create(context: FeaturesContext) -> LayersFeatures:
             previous_layer = {}
             for layer in layers_in_order:
                 if isinstance(layer, list):
-                    layer_instance = await _load_composite_layer(
+                    layer_instance = await self._load_composite_layer(
                         app,
                         layer,
                         {k: v for k, v in existing_layers.items() if k != "log"},
@@ -220,7 +240,7 @@ def create(context: FeaturesContext) -> LayersFeatures:
                         anti_layers,
                     )
                 else:
-                    layer_instance = await _load_layer(
+                    layer_instance = await self._load_layer(
                         app,
                         layer,
                         {k: v for k, v in existing_layers.items() if k != "log"},
@@ -234,13 +254,10 @@ def create(context: FeaturesContext) -> LayersFeatures:
                     new_context = {k: v for k, v in new_context.items() if k != "log"}
                 existing_layers = new_context
                 previous_layer = layer_instance
-        return existing_layers
+        return Box(existing_layers)
 
-    return Box(
-        {
-            "load_layers": load_layers,
-        }
-    )
+def create(context: FeaturesContext) -> LayersFeatures:
+    return LayersFeatures(context)
 
 
 def _get(mapping: Mapping[str, Any], dotted: str, default: Any = None) -> Any:

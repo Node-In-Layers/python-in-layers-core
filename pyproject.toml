@@ -1,6 +1,6 @@
 [project]
-name = "in-layers-python"
-version = "0.1.0"
+name = "in-layers-core"
+version = "0.1.1"
 description = "The Python port of Node in Layers Core."
 authors = [
     {name = "Mike Cornwell",email = "mike@mikecornwell.com"}
@@ -10,12 +10,13 @@ readme = "README.md"
 homepage = "https://github.com/node-in-layers/python-in-layers-core"  
 repository = "https://github.com/node-in-layers/python-in-layers-core"
 keywords = ["layers", "python", "in-layers", "node", "domains"]
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
+    "httpx (>=0.28.1,<0.29.0)"
 ]
 
 [tool.poetry]
-name = "in-layers-python"
+name = "in-layers-core"
 version = "0.1.0"
 description = ""
 authors = []
@@ -36,11 +37,14 @@ dev = [
     "isort>=5.12.0",
     "mypy>=1.12.0",
     "pytest>=8.0.0",
-    "commitizen (>=3.14,<4.0)",
+    "commitizen (>=3.13,<4.0)",
+    "pytest-cov (>=7.0.0,<8.0.0)",
+    "build (>=1.3.0,<2.0.0)",
+    "twine (>=6.2.0,<7.0.0)",
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.14"
+python = ">=3.13"
 python-box = ">=7,<9"
 
 [tool.isort]

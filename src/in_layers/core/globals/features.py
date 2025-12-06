@@ -2,20 +2,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from box import Box
-
 from ..libs import is_config, validate_config
-from ..protocols import CommonContext, CoreNamespace, FeaturesContext, GlobalsFeatures
+from ..protocols import CommonContext, CoreNamespace, FeaturesContext
 
 globals_name = CoreNamespace.globals.value
 
 
-def create(context: FeaturesContext) -> GlobalsFeatures:
-    services = context.services[globals_name]
-    if not services:
-        raise RuntimeError(f"Services for {globals_name} not found")
+class GlobalsFeatures:
+    def __init__(self, context: FeaturesContext):
+        self.context = context
 
-    async def load_globals(environment_or_config: Any):
+    async def load_globals(self, environment_or_config: Any):
+        services = self.context.services[globals_name]
+        if not services:
+            raise RuntimeError(f"Services for {globals_name} not found")
         config = (
             environment_or_config
             if is_config(environment_or_config)
@@ -29,8 +29,6 @@ def create(context: FeaturesContext) -> GlobalsFeatures:
         }
         return common_globals
 
-    return Box(
-        {
-            "load_globals": load_globals,
-        }
-    )
+
+def create(context: FeaturesContext) -> GlobalsFeatures:
+    return GlobalsFeatures(context)

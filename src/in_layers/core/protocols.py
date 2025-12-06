@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 import datetime
-from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from enum import Enum
 from typing import (
     Any,
+    Awaitable,
+    Callable,
+    Mapping,
+    MutableMapping,
     NotRequired,
     Protocol,
     TypedDict,
+    TypeVar,
+    Union,
 )
 
-# --- Enums ---
+# ======================================================================
+# Core enums
+# ======================================================================
 
 
 class LogLevel(Enum):
@@ -53,37 +61,71 @@ class CommonLayerName(str, Enum):
     entries = "entries"
 
 
-# --- Core Data Types ---
+# ======================================================================
+# Generic helpers / aliases
+# ======================================================================
+
+JsonAble = Union[
+    None,
+    bool,
+    int,
+    float,
+    str,
+    Mapping[str, Any],
+    list[Any],
+]
 
 LogId = Mapping[str, str]
+MaybeAwaitable = TypeVar("MaybeAwaitable", bound=Union[Any, Awaitable[Any]])
 
 
-class ErrorDetails(TypedDict, total=False):
+# ======================================================================
+# Error / logging base shapes
+# ======================================================================
+
+
+@dataclass(frozen=True)
+class ErrorDetails:
     code: str
     message: str
-    details: str
-    data: dict[str, Any]
-    trace: str
-    cause: ErrorDetails
+    details: str | None = None
+    data: Mapping[str, JsonAble] | None = None
+    trace: str | None = None
+    cause: "ErrorObject" | None = None
 
 
-class ErrorObject(TypedDict):
+@dataclass(frozen=True)
+class ErrorObject:
     error: ErrorDetails
 
 
-class LogMessage(TypedDict, total=False):
+@dataclass(frozen=True)
+class LogInstanceOptions:
+    ignore_size_limit: bool | None = None
+
+
+@dataclass(frozen=True)
+class LogMessage:
     id: str
     logger: str
     environment: str
-    ids: list[LogId]
     log_level: LogLevelNames
     datetime: datetime.datetime
     message: str
-    # extra fields allowed
+    ids: list[LogId] | None = None
+    # arbitrary extra fields are allowed by convention; not modeled here
 
 
 LogFunction = Callable[[LogMessage], Any]
-LogMethod = Callable[["CommonContext"], LogFunction]
+
+
+class LogMethod(Protocol):
+    def __call__(self, context: "CommonContext") -> LogFunction: ...
+
+
+# ======================================================================
+# Cross-layer props
+# ======================================================================
 
 
 class CrossLayerLogging(TypedDict, total=False):
@@ -91,117 +133,61 @@ class CrossLayerLogging(TypedDict, total=False):
 
 
 class CrossLayerProps(TypedDict, total=False):
-    logging: CrossLayerLogging
+    logging: NotRequired[CrossLayerLogging]
+    # additional ad‑hoc fields are possible but not explicitly typed
 
 
-# --- Config Types ---
-
-
-class CoreLoggingConfig(TypedDict, total=False):
-    log_level: LogLevelNames
-    log_format: LogFormat | list[LogFormat]
-    max_log_size_in_characters: int
-    tcp_logging_options: Mapping[str, Any]
-    custom_logger: RootLogger
-    get_function_wrap_log_level: Callable[[str, str | None], LogLevelNames]
-    ignore_layer_functions: Mapping[str, bool | Mapping[str, bool | Mapping[str, bool]]]
-
-
-class App(TypedDict, total=False):
-    name: str
-    description: str
-    services: Mapping[str, Any]
-    features: Mapping[str, Any]
-    globals: Mapping[str, Any]
-    models: Mapping[str, ModelConstructor]
-
-
-LayerDescription = str | list[str]
-
-
-class CoreConfig(TypedDict, total=False):
-    logging: CoreLoggingConfig
-    layer_order: list[LayerDescription]
-    # Python canonical: domains; Back-compat alias: apps
-    domains: list[App]
-    apps: list[App]
-    model_factory: str
-    model_cruds: bool
-    custom_model_factory: Mapping[str, Any]
-
-
-class CommonConstants(TypedDict):
-    environment: str
-    working_directory: str
-    runtime_id: str
-
-
-class Config(Protocol):
-    system_name: str
-    environment: str
-
-    def __getitem__(self, key: str) -> Any: ...
-
-
-class RootLogger(Protocol):
-    def get_logger(
-        self,
-        context: CommonContext,
-        props: Mapping[str, Any] | None = None,
-    ) -> HighLevelLogger: ...
-
-
-# --- Logger Protocols ---
+# ======================================================================
+# Logger protocols
+# ======================================================================
 
 
 class Logger(Protocol):
     def trace(
         self,
         message: str,
-        data_or_error: Mapping[str, Any] | None = None,
-        *,
-        ignore_size_limit: bool = False,
+        data_or_error: Mapping[str, JsonAble | object] | ErrorObject | None = None,
+        options: LogInstanceOptions | None = None,
     ) -> Any: ...
 
     def debug(
         self,
         message: str,
-        data_or_error: Mapping[str, Any] | None = None,
-        *,
-        ignore_size_limit: bool = False,
+        data_or_error: Mapping[str, JsonAble | object] | ErrorObject | None = None,
+        options: LogInstanceOptions | None = None,
     ) -> Any: ...
 
     def info(
         self,
         message: str,
-        data_or_error: Mapping[str, Any] | None = None,
-        *,
-        ignore_size_limit: bool = False,
+        data_or_error: Mapping[str, JsonAble | object] | ErrorObject | None = None,
+        options: LogInstanceOptions | None = None,
     ) -> Any: ...
 
     def warn(
         self,
         message: str,
-        data_or_error: Mapping[str, Any] | None = None,
-        *,
-        ignore_size_limit: bool = False,
+        data_or_error: Mapping[str, JsonAble | object] | ErrorObject | None = None,
+        options: LogInstanceOptions | None = None,
     ) -> Any: ...
 
     def error(
         self,
         message: str,
-        data_or_error: Mapping[str, Any] | None = None,
-        *,
-        ignore_size_limit: bool = False,
+        data_or_error: Mapping[str, JsonAble | object] | ErrorObject | None = None,
+        options: LogInstanceOptions | None = None,
     ) -> Any: ...
 
-    def apply_data(self, data: Mapping[str, Any]) -> Logger: ...
+    def apply_data(self, data: Mapping[str, JsonAble]) -> "Logger": ...
 
     def get_id_logger(
-        self, name: str, log_id_or_key: LogId | str, id: str | None = None
-    ) -> Logger: ...
+        self,
+        name: str,
+        log_id_or_key: LogId | str,
+        id: str | None = None,
+    ) -> "Logger": ...
 
-    def get_sub_logger(self, name: str) -> Logger: ...
+    def get_sub_logger(self, name: str) -> "Logger": ...
 
     def get_ids(self) -> list[LogId]: ...
 
@@ -211,23 +197,33 @@ FunctionLogger = Logger
 
 class LayerLogger(Logger, Protocol):
     def _log_wrap(
-        self, function_name: str, func: Callable[..., Any]
+        self,
+        function_name: str,
+        func: Callable[..., Any],
     ) -> Callable[..., Any]: ...
 
     def _log_wrap_async(
-        self, function_name: str, func: Callable[..., Any]
-    ) -> Callable[..., Any]: ...
+        self,
+        function_name: str,
+        func: Callable[..., Awaitable[Any]],
+    ) -> Callable[..., Awaitable[Any]]: ...
 
     def _log_wrap_sync(
-        self, function_name: str, func: Callable[..., Any]
+        self,
+        function_name: str,
+        func: Callable[..., Any],
     ) -> Callable[..., Any]: ...
 
     def get_function_logger(
-        self, name: str, cross_layer_props: CrossLayerProps | None = None
+        self,
+        name: str,
+        cross_layer_props: CrossLayerProps | None = None,
     ) -> FunctionLogger: ...
 
     def get_inner_logger(
-        self, function_name: str, cross_layer_props: CrossLayerProps | None = None
+        self,
+        function_name: str,
+        cross_layer_props: CrossLayerProps | None = None,
     ) -> FunctionLogger: ...
 
 
@@ -243,7 +239,73 @@ class HighLevelLogger(Logger, Protocol):
     def get_app_logger(self, app_name: str) -> AppLogger: ...
 
 
-# --- Contexts & Layer Contracts ---
+class RootLogger(Protocol):
+    def get_logger(
+        self,
+        context: "CommonContext",
+        props: Mapping[str, Any] | None = None,
+    ) -> HighLevelLogger: ...
+
+
+# ======================================================================
+# Logging configuration
+# ======================================================================
+
+
+@dataclass(frozen=True)
+class CoreLoggingConfig:
+    log_level: LogLevelNames
+    log_format: LogFormat | list[LogFormat]
+    max_log_size_in_characters: int | None = None
+    tcp_logging_options: Mapping[str, Any] | None = None
+    custom_logger: RootLogger | None = None
+
+    # domain -> (bool | (layer -> (bool | (function -> bool))))
+    ignore_layer_functions: Mapping[
+        str,
+        bool | Mapping[str, bool | Mapping[str, bool]],
+    ] | None = None
+
+    # (layerName, functionName?) -> logLevel
+    get_function_wrap_log_level: (
+        Callable[[str, str | None], LogLevelNames] | None
+    ) = None
+
+
+# ======================================================================
+# Config / context
+# ======================================================================
+
+
+class CommonConstants(TypedDict):
+    environment: str
+    working_directory: str
+    runtime_id: str
+
+
+# Forward refs
+class App(TypedDict):  # defined fully below
+    ...
+
+
+LayerDescription = Union[str, list[str]]
+
+
+@dataclass(frozen=True)
+class CoreConfig:
+    logging: CoreLoggingConfig
+    layer_order: list[LayerDescription]
+    apps: list["App"]               # like TS `apps: readonly App[]`
+    model_factory: str | None = None
+    model_cruds: bool = False
+    custom_model_factory: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class Config:
+    system_name: str
+    environment: str
+    core: CoreConfig  # equivalent to TS `[CoreNamespace.root]: CoreConfig`
 
 
 class CommonContext(TypedDict):
@@ -266,59 +328,50 @@ class FeaturesContext(LayerContext, total=False):
     features: Mapping[str, Any]
 
 
-class AppLayer(Protocol):
-    def create(self, context: LayerContext) -> Any: ...
+# ======================================================================
+# Models-related (only the parts you mirror / need)
+# ======================================================================
 
-
-class ServicesLayerFactory(Protocol):
-    def create(self, context: ServicesContext) -> Any: ...
-
-
-class FeaturesLayerFactory(Protocol):
-    def create(self, context: FeaturesContext) -> Any: ...
-
-
-# --- Models (shape only; implementations elsewhere) ---
-
+# Placeholder protocol for model constructors/factories, since you said
+# "ignore any TS types that aren't represented"; this stays minimal.
 
 class ModelConstructor(Protocol):
-    def create(self, model_props: Mapping[str, Any]) -> Any: ...
+    def create(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
-# --- Helper marker (typing hint only) ---
+# ======================================================================
+# Core "App" (domain) shape
+# ======================================================================
 
 
-def layer_function(fn: Callable[..., Any]) -> Callable[..., Any]:
-    return fn
+class App(TypedDict, total=False):
+    name: str
+    description: NotRequired[str]
+
+    # config-driven layers (services/features/globals/models)
+    # Each is a "layer factory": a module-like object with `create(context)`.
+
+    # A generic layer: `create(LayerContext) -> layer instance`
+    services: "AppLayer"
+    features: "AppLayer"
+    globals: "GlobalsLayer"
+    models: Mapping[str, ModelConstructor]
 
 
-# --- Globals typed shapes (for create functions) ---
+# A generic layer factory: create(context) -> layer object
+class AppLayer(Protocol):
+    def create(self, context: LayerContext) -> Any | Awaitable[Any]: ...
 
 
-class GlobalsServicesProps(TypedDict):
+class GlobalsLayer(Protocol):
+    def create(self, context: CommonContext) -> Awaitable[Mapping[str, Any]]: ...
+
+
+# ======================================================================
+# Globals shapes
+# ======================================================================
+
+
+class GlobalsServicesProps(TypedDict, total=False):
     environment: str
     working_directory: str
-    runtime_id: NotRequired[str]
-
-
-class GlobalsServices(TypedDict):
-    load_config: Callable[[], Config]
-    get_root_logger: Callable[[], RootLogger]
-    get_constants: Callable[[], CommonConstants]
-    get_globals: Callable[[CommonContext, App], Awaitable[Mapping[str, Any]]]
-
-
-class GlobalsFeatures(TypedDict):
-    load_globals: Callable[[str | Config], Awaitable[CommonContext]]
-
-
-# --- Layers typed shapes (for create functions) ---
-
-
-class LayersServices(TypedDict):
-    get_model_props: Callable[[ServicesContext], Mapping[str, Any]]
-    load_layer: Callable[[App, str, LayerContext], Mapping[str, Any] | None]
-
-
-class LayersFeatures(TypedDict):
-    load_layers: Callable[[], Awaitable[FeaturesContext]]

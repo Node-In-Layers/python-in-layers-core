@@ -28,7 +28,6 @@ from .protocols import (  # noqa: F401
     CoreNamespace,
     CrossLayerProps,
     FeaturesContext,
-    FeaturesLayerFactory,
     FunctionLogger,
     HighLevelLogger,
     LayerContext,
@@ -42,7 +41,6 @@ from .protocols import (  # noqa: F401
     LogMessage,
     LogMethod,
     RootLogger,
-    layer_function,
 )
 
 __all__ = [
