@@ -18,12 +18,6 @@ class GlobalsServices:
     def get_root_logger(self):
         return standard_logger()
 
-    def load_config(self):
-
-        raise RuntimeError(
-            f"Config auto-discovery not implemented for Python; pass config explicitly for environment {self.props.get('environment')}"
-        )
-
     def _import_module_from_file(self, module_name: str, path: Path):
         spec = importlib.util.spec_from_file_location(module_name, path)
         if spec is None or spec.loader is None:
@@ -58,7 +52,7 @@ class GlobalsServices:
 
         return config
 
-    def get_config(self):
+    def load_config(self):
         return self._load_config()
 
     def get_constants(self):

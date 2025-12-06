@@ -1,4 +1,4 @@
-from .entries import load_system
+from .entries import SystemProps, load_system
 from .globals.libs import (  # noqa: F401
     extract_cross_layer_props,
 )
@@ -25,6 +25,7 @@ from .protocols import (  # noqa: F401
     CommonContext,
     Config,
     CoreConfig,
+    CoreLoggingConfig,
     CoreNamespace,
     CrossLayerProps,
     FeaturesContext,

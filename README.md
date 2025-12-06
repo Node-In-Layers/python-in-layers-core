@@ -8,3 +8,20 @@ Key points:
 - Layers are loaded in configured order (supports composite layers)
 - Cross-layer logging with automatic id propagation and function wraps
 
+
+## Contributing
+
+### Running Unit Tests
+```bash
+poetry run pytest --cov=. --cov-report=term-missing --cov-report=html -q
+```
+
+### Auto-Cleaning / Checking Tools
+```bash
+./bin/lint.sh
+```
+
+### Publishing
+```bash
+./bin/deploy.sh
+```

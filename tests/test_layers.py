@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from in_layers.core.entries import load_system
+from in_layers.core.entries import load_system, SystemProps
 from box import Box
 from in_layers.core.protocols import CoreNamespace, LogFormat, LogLevelNames
 
@@ -52,7 +52,7 @@ def _config():
 
 def test_feature_calls_service_and_returns_expected_value():
     async def run():
-        sys = await load_system({"environment": "test", "config": _config()})
+        sys = await load_system(SystemProps(environment="test", config=_config()))
         res = sys.features.demo.callEcho("X")
         assert res[0] == "F:S:X"
 
@@ -61,7 +61,7 @@ def test_feature_calls_service_and_returns_expected_value():
 
 def test_crosslayer_ids_present_in_result():
     async def run():
-        sys = await load_system({"environment": "test", "config": _config()})
+        sys = await load_system(SystemProps(environment="test", config=_config()))
         res = sys.features.demo.callEcho("X")
         assert isinstance(res[1], dict)
         assert "logging" in res[1]
@@ -75,7 +75,7 @@ def test_crosslayer_ids_present_in_result():
 def test_wrapper_logs_emitted(caplog):
     async def run():
         with caplog.at_level(logging.INFO):
-            sys = await load_system({"environment": "test", "config": _config()})
+            sys = await load_system(SystemProps(environment="test", config=_config()))
             _ = sys.features.demo.callEcho("X")
             joined = " ".join(caplog.messages)
             assert ("Executing features function" in joined) or (
@@ -87,7 +87,7 @@ def test_wrapper_logs_emitted(caplog):
 
 def test_feature_callable_exposed():
     async def run():
-        sys = await load_system({"environment": "test", "config": _config()})
+        sys = await load_system(SystemProps(environment="test", config=_config()))
         assert callable(sys.features.demo.callEcho)
 
     asyncio.run(run())

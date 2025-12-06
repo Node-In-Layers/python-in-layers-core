@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from in_layers.core.entries import load_system
+from in_layers.core.entries import load_system, SystemProps
 from in_layers.core.protocols import CoreNamespace, LogFormat, LogLevelNames
 
 
@@ -64,7 +64,7 @@ def _config():
 
 def test_composite_layers_output_correct():
     async def run():
-        sys = await load_system({"environment": "test", "config": _config()})
+        sys = await load_system(SystemProps(environment="test", config=_config()))
         out, _ = sys.features.demo.callBoth("X")
         assert out == "1:X2:X"
 
@@ -73,7 +73,7 @@ def test_composite_layers_output_correct():
 
 def test_composite_layers_crosslayer_ids_present():
     async def run():
-        sys = await load_system({"environment": "test", "config": _config()})
+        sys = await load_system(SystemProps(environment="test", config=_config()))
         _, cross = sys.features.demo.callBoth("X")
         assert isinstance(cross, dict)
         assert "logging" in cross

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from box import Box
@@ -14,13 +15,16 @@ from .layers import name as layers_name
 from .layers import services as layers_services
 
 
-async def load_system(args: Mapping[str, Any]):
-    environment: str = args["environment"]
-    config: Mapping[str, Any] | None = args.get("config")
+@dataclass(frozen=True)
+class SystemProps:
+    environment: str
+    config: Mapping[str, Any] | None = None
 
+
+async def load_system(props: SystemProps):
     global_services = globals_services.create(
         {
-            "environment": environment,
+            "environment": props.environment,
             "working_directory": os.getcwd(),
         }
     )
@@ -33,7 +37,9 @@ async def load_system(args: Mapping[str, Any]):
             }
         )
     )
-    globals_context = await global_features.load_globals(config or environment)
+    globals_context = await global_features.load_globals(
+        props.config or props.environment
+    )
 
     # layers
 

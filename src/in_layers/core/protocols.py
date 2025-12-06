@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import datetime
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
 from enum import Enum
 from typing import (
     Any,
-    NotRequired,
     Protocol,
     TypedDict,
     TypeVar,
     Union,
 )
+
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.dataclasses import dataclass
 
 # ======================================================================
 # Core enums
@@ -45,10 +46,10 @@ class LogFormat(str, Enum):
 
 
 class CoreNamespace(str, Enum):
-    root = "@node-in-layers/core"
-    globals = "@node-in-layers/core/globals"
-    layers = "@node-in-layers/core/layers"
-    models = "@node-in-layers/core/models"
+    root = "in-layers/core"
+    globals = "in-layers/core/globals"
+    layers = "in-layers/core/layers"
+    models = "in-layers/core/models"
 
 
 class CommonLayerName(str, Enum):
@@ -83,17 +84,23 @@ MaybeAwaitable = TypeVar("MaybeAwaitable", bound=Any | Awaitable[Any])
 
 @dataclass(frozen=True)
 class ErrorDetails:
-    code: str
-    message: str
-    details: str | None = None
-    data: Mapping[str, JsonAble] | None = None
-    trace: str | None = None
-    cause: ErrorObject | None = None
+    code: str = Field(..., description="A unique string code for the error")
+    message: str = Field(..., description="A user friendly error message.")
+    details: str | None = Field(
+        None, description="Additional details in a string format."
+    )
+    data: Mapping[str, JsonAble] | None = Field(
+        None, description="Additional data as an object."
+    )
+    trace: str | None = Field(None, description="A trace of the error.")
+    cause: ErrorObject | None = Field(
+        None, description="A suberror that has the cause of the error."
+    )
 
 
 @dataclass(frozen=True)
 class ErrorObject:
-    error: ErrorDetails
+    error: ErrorDetails = Field(..., description="The error details.")
 
 
 @dataclass(frozen=True)
@@ -125,12 +132,14 @@ class LogMethod(Protocol):
 # ======================================================================
 
 
-class CrossLayerLogging(TypedDict, total=False):
+class CrossLayerLogging(BaseModel):
+    model_config = ConfigDict(extra="allow")
     ids: list[LogId]
 
 
-class CrossLayerProps(TypedDict, total=False):
-    logging: NotRequired[CrossLayerLogging]
+class CrossLayerProps(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    logging: CrossLayerLogging | None
     # additional ad‑hoc fields are possible but not explicitly typed
 
 
@@ -251,24 +260,25 @@ class RootLogger(Protocol):
 
 @dataclass(frozen=True)
 class CoreLoggingConfig:
-    log_level: LogLevelNames
-    log_format: LogFormat | list[LogFormat]
-    max_log_size_in_characters: int | None = None
-    tcp_logging_options: Mapping[str, Any] | None = None
-    custom_logger: RootLogger | None = None
+    log_level: LogLevelNames = Field(..., description="The default log level.")
+    log_format: LogFormat | list[LogFormat] = Field(
+        ..., description="The log format or formats to use."
+    )
+    max_log_size_in_characters: int | None = Field(
+        None, description="The maximum log size in characters."
+    )
+    tcp_logging_options: Mapping[str, Any] | None = Field(
+        None, description="The TCP logging options."
+    )
+    custom_logger: Any | None = Field(None, description="The custom logger to use.")
 
     # domain -> (bool | (layer -> (bool | (function -> bool))))
     ignore_layer_functions: (
-        Mapping[
-            str,
-            bool | Mapping[str, bool | Mapping[str, bool]],
-        ]
-        | None
-    ) = None
-
+        Mapping[str, bool | Mapping[str, bool | Mapping[str, bool]]] | None
+    ) = Field(None, description="The functions to ignore.")
     # (layerName, functionName?) -> logLevel
     get_function_wrap_log_level: Callable[[str, str | None], LogLevelNames] | None = (
-        None
+        Field(None, description="The function to get the log level for a function.")
     )
 
 
@@ -288,56 +298,58 @@ class App(TypedDict):  # defined fully below
     ...
 
 
-LayerDescription = Union[str, list[str]]
+LayerDescription = str | list[str]
 
 
 @dataclass(frozen=True)
 class CoreConfig:
-    logging: CoreLoggingConfig
-    layer_order: list[LayerDescription]
-    apps: list[App]  # like TS `apps: readonly App[]`
-    model_factory: str | None = None
-    model_cruds: bool = False
-    custom_model_factory: Mapping[str, Any] | None = None
+    logging: CoreLoggingConfig = Field(..., description="The logging configuration.")
+    layer_order: list[LayerDescription] = Field(
+        ..., description="The order of the layers to load."
+    )
+    domains: list[App] = Field(..., description="The domains/apps to load.")
+    model_factory: str | None = Field(
+        None,
+        description="The namespace to the domain.services that has a 'getModelProps()' function used for loading models.",
+    )
+    model_cruds: bool = Field(
+        False,
+        description="When true, wrappers are built around models to bubble up CRUDS interfaces for models through services and features.",
+    )
+    custom_model_factory: Mapping[str, Any] | None = Field(
+        None, description="Provides granular 'getModelProps()' for specific models."
+    )
 
 
-@dataclass(frozen=True)
-class Config:
-    system_name: str
-    environment: str
-    core: CoreConfig  # equivalent to TS `[CoreNamespace.root]: CoreConfig`
+class Config(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    system_name: str = Field(..., description="The name of the system.")
+    environment: str = Field(
+        ..., description="The environment the system is running in."
+    )
+    in_layers_core: CoreConfig = Field(..., description="The core configuration.")
 
 
-class CommonContext(TypedDict):
-    config: Config
-    root_logger: RootLogger
-    constants: CommonConstants
+class CommonContext(BaseModel):
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+    config: Config = Field(..., description="The configuration for the system.")
+    root_logger: Any = Field(..., description="The root logger for the system.")
+    constants: CommonConstants = Field(..., description="The constants for the system.")
 
 
-class LayerContext(CommonContext, total=False):
-    log: LayerLogger
+class LayerContext(CommonContext):
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+    log: Any
 
 
-class ServicesContext(LayerContext, total=False):
+class ServicesContext(LayerContext):
     models: Mapping[str, Mapping[str, Callable[[], Any]]]
     services: Mapping[str, Any]
 
 
-class FeaturesContext(LayerContext, total=False):
+class FeaturesContext(LayerContext):
     services: Mapping[str, Any]
     features: Mapping[str, Any]
-
-
-# ======================================================================
-# Models-related (only the parts you mirror / need)
-# ======================================================================
-
-# Placeholder protocol for model constructors/factories, since you said
-# "ignore any TS types that aren't represented"; this stays minimal.
-
-
-class ModelConstructor(Protocol):
-    def create(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 # ======================================================================
@@ -345,32 +357,26 @@ class ModelConstructor(Protocol):
 # ======================================================================
 
 
-class App(TypedDict, total=False):
-    name: str
-    description: NotRequired[str]
+class Domain(BaseModel):
+    name: str = Field(..., description="The name of the domain.")
+    description: str | None = Field(None, description="The description of the domain.")
+    services: AppLayer | None = Field(
+        None, description="The services layer for the domain."
+    )
+    features: AppLayer | None = Field(
+        None, description="The features layer for the domain."
+    )
+    globals: GlobalsLayer | None = Field(
+        None, description="The globals layer for the domain."
+    )
 
-    # config-driven layers (services/features/globals/models)
-    # Each is a "layer factory": a module-like object with `create(context)`.
 
-    # A generic layer: `create(LayerContext) -> layer instance`
-    services: AppLayer
-    features: AppLayer
-    globals: GlobalsLayer
-    models: Mapping[str, ModelConstructor]
-
-
-# A generic layer factory: create(context) -> layer object
 class AppLayer(Protocol):
-    def create(self, context: LayerContext) -> Any | Awaitable[Any]: ...
+    def create(self, context: CommonContext) -> Awaitable[Mapping[str, Any]]: ...
 
 
 class GlobalsLayer(Protocol):
     def create(self, context: CommonContext) -> Awaitable[Mapping[str, Any]]: ...
-
-
-# ======================================================================
-# Globals shapes
-# ======================================================================
 
 
 class GlobalsServicesProps(TypedDict, total=False):
