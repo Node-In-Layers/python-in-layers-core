@@ -78,7 +78,9 @@ def test_wrapper_logs_emitted(caplog):
             sys = await load_system({"environment": "test", "config": _config()})
             _ = sys.features.demo.callEcho("X")
             joined = " ".join(caplog.messages)
-            assert ("Executing features function" in joined) or ("Executed features function" in joined)
+            assert ("Executing features function" in joined) or (
+                "Executed features function" in joined
+            )
 
     asyncio.run(run())
 

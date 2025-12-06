@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-import uuid
-from collections.abc import Mapping
-from typing import Any
-
 import importlib.util
-import os
+import uuid
+from collections.abc import Callable, Mapping
 from dataclasses import is_dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any
 
 from ..protocols import CommonContext, GlobalsServicesProps
 from .logging import standard_logger
+
 
 class GlobalsServices:
     def __init__(self, props: GlobalsServicesProps):
@@ -21,7 +19,7 @@ class GlobalsServices:
         return standard_logger()
 
     def load_config(self):
-        
+
         raise RuntimeError(
             f"Config auto-discovery not implemented for Python; pass config explicitly for environment {self.props.get('environment')}"
         )
@@ -35,8 +33,8 @@ class GlobalsServices:
         return module
 
     def _load_config(self):
-        environment = self.props.get('environment')
-        base_dir = Path(self.props.get('working_directory'))
+        environment = self.props.get("environment")
+        base_dir = Path(self.props.get("working_directory"))
         config_file = base_dir / f"config_{environment}.py"
 
         if not config_file.exists():
@@ -48,11 +46,9 @@ class GlobalsServices:
         module = _import_module_from_file(module_name, config_file)
 
         if not hasattr(module, "get_config"):
-            raise AttributeError(
-                f"Module {module_name} does not define get_config()"
-            )
+            raise AttributeError(f"Module {module_name} does not define get_config()")
 
-        get_config: Callable[[], AppConfig] = getattr(module, "get_config")
+        get_config: Callable[[], AppConfig] = module.get_config
         config = get_config()
 
         if not is_dataclass(config) or not isinstance(config, AppConfig):
@@ -73,9 +69,10 @@ class GlobalsServices:
         }
 
     async def get_globals(self, common_globals: CommonContext, app: Mapping[str, Any]):
-      if 'globals' in app:
-        return app.globals.create(common_globals)
-      return {}
+        if "globals" in app:
+            return app.globals.create(common_globals)
+        return {}
+
 
 def create(props: GlobalsServicesProps) -> GlobalsServices:
     return GlobalsServices(props)

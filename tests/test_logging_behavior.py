@@ -32,10 +32,13 @@ def test_composite_logger_emits_and_includes_names_and_ids():
     def method(_c):
         def log_fn(msg):
             collected.append(msg)  # type: ignore[arg-type]
+
         return log_fn
 
     root: RootLogger = composite_logger([method])
-    hl = root.get_logger(_ctx({"log_level": LogLevelNames.info, "log_format": "simple"}))
+    hl = root.get_logger(
+        _ctx({"log_level": LogLevelNames.info, "log_format": "simple"})
+    )
     app = hl.get_app_logger("demo")
     layer = app.get_layer_logger("features")
     flog = layer.get_function_logger("say")
@@ -49,13 +52,16 @@ def test_log_level_respected_no_output_when_lower_than_config():
     def method(_c):
         def log_fn(msg):
             collected.append(msg)  # type: ignore[arg-type]
+
         return log_fn
 
     root: RootLogger = composite_logger([method])
-    hl = root.get_logger(_ctx({"log_level": LogLevelNames.warn, "log_format": "simple"}))
-    hl.get_app_logger("demo").get_layer_logger("features").get_function_logger("x").debug(
-        "hidden"
+    hl = root.get_logger(
+        _ctx({"log_level": LogLevelNames.warn, "log_format": "simple"})
     )
+    hl.get_app_logger("demo").get_layer_logger("features").get_function_logger(
+        "x"
+    ).debug("hidden")
     assert collected == []
 
 
@@ -65,6 +71,7 @@ def test_wrapper_logs_use_custom_wrap_level():
     def method(_c):
         def log_fn(msg):
             collected.append(msg["message"])  # type: ignore[index]
+
         return log_fn
 
     ctx = _ctx(
@@ -78,16 +85,21 @@ def test_wrapper_logs_use_custom_wrap_level():
     layer = root.get_logger(ctx).get_app_logger("demo").get_layer_logger("features")
     fn = layer._log_wrap("wrapped", lambda log, x, cross=None: x)  # type: ignore[call-arg]
     fn("X")
-    assert any("Executing features function" in m or "Executed features function" in m for m in collected)
+    assert any(
+        "Executing features function" in m or "Executed features function" in m
+        for m in collected
+    )
 
 
 def test_standard_logger_json_format_emits(caplog):
     with caplog.at_level("INFO"):
         root = standard_logger()
-        hl = root.get_logger(_ctx({"log_level": LogLevelNames.info, "log_format": "json"}))
-        hl.get_app_logger("demo").get_layer_logger("features").get_function_logger("fn").info(
-            "M", {"a": 1}
+        hl = root.get_logger(
+            _ctx({"log_level": LogLevelNames.info, "log_format": "json"})
         )
+        hl.get_app_logger("demo").get_layer_logger("features").get_function_logger(
+            "fn"
+        ).info("M", {"a": 1})
         joined = " ".join(caplog.messages)
         assert '"logger": "demo:features:fn"' in joined
 
@@ -98,6 +110,7 @@ def test_ids_stack_includes_runtime_and_function():
     def method(_c):
         def log_fn(msg):
             collected.append(msg)  # type: ignore[arg-type]
+
         return log_fn
 
     root: RootLogger = composite_logger([method])
@@ -110,7 +123,9 @@ def test_ids_stack_includes_runtime_and_function():
     )
     flog.info("Z")
     ids = collected[0].get("ids") or []
-    assert any("runtime_id" in d for d in ids) and any("function_call_id" in d for d in ids)
+    assert any("runtime_id" in d for d in ids) and any(
+        "function_call_id" in d for d in ids
+    )
 
 
 def test_tcp_logger_raises_helpful_error_when_missing_options():
@@ -119,4 +134,3 @@ def test_tcp_logger_raises_helpful_error_when_missing_options():
     with pytest.raises(Exception):
         # constructing the logger will attempt to build tcp method and fail without options
         root.get_logger(bad)
-

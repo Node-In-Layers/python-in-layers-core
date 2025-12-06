@@ -1,6 +1,6 @@
 [project]
 name = "in-layers-core"
-version = "0.1.1"
+version = "0.1.4"
 description = "The Python port of Node in Layers Core."
 authors = [
     {name = "Mike Cornwell",email = "mike@mikecornwell.com"}
@@ -12,7 +12,8 @@ repository = "https://github.com/node-in-layers/python-in-layers-core"
 keywords = ["layers", "python", "in-layers", "node", "domains"]
 requires-python = ">=3.13"
 dependencies = [
-    "httpx (>=0.28.1,<0.29.0)"
+    "httpx (>=0.28.1,<0.29.0)",
+    "python-box (>=7,<9)"
 ]
 
 [tool.poetry]
@@ -46,6 +47,7 @@ dev = [
 [tool.poetry.dependencies]
 python = ">=3.13"
 python-box = ">=7,<9"
+httpx = ">=0.28.1,<0.29.0"
 
 [tool.isort]
 profile = "black"

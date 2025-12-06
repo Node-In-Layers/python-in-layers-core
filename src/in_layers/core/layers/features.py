@@ -56,9 +56,9 @@ class LayersFeatures:
             for name in dir(obj):
                 if name.startswith("_"):
                     continue
-                try:  # noqa: SIM105
+                try:
                     attr = getattr(obj, name)
-                except Exception:  # noqa: S110
+                except Exception:
                     continue
                 yield name, attr
 
@@ -92,8 +92,8 @@ class LayersFeatures:
         app: Mapping[str, Any],
         composite_layers,
         common_context: Mapping[str, Any],
-        previous_layer: Mapping[str, Any] | None,  # noqa: ARG001
-        anti_layers_fn,  # noqa: ARG001
+        previous_layer: Mapping[str, Any] | None,
+        anti_layers_fn,
     ):
         result = {}
         for layer in composite_layers:
@@ -255,6 +255,7 @@ class LayersFeatures:
                 existing_layers = new_context
                 previous_layer = layer_instance
         return Box(existing_layers)
+
 
 def create(context: FeaturesContext) -> LayersFeatures:
     return LayersFeatures(context)

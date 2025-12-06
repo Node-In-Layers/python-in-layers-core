@@ -44,15 +44,18 @@ def _config():
         "system_name": "test",
         "environment": "test",
         CoreNamespace.root.value: {
-            "logging": {"log_level": LogLevelNames.info, "log_format": LogFormat.simple},
+            "logging": {
+                "log_level": LogLevelNames.info,
+                "log_format": LogFormat.simple,
+            },
             # composite layer with two sub-layers 'first' and 'second'
             "layer_order": ["services", ["first_layer", "second_layer"], "features"],
             "apps": [
                 {
-                  "name": "demo",
-                  "first_layer": {"create": first_create},
-                  "second_layer": {"create": second_create},
-                  "features": {"create": features_create}
+                    "name": "demo",
+                    "first_layer": {"create": first_create},
+                    "second_layer": {"create": second_create},
+                    "features": {"create": features_create},
                 }
             ],
         },
@@ -77,4 +80,3 @@ def test_composite_layers_crosslayer_ids_present():
         assert "ids" in cross["logging"]
 
     asyncio.run(run())
-

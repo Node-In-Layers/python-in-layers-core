@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import datetime
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
     Any,
-    Awaitable,
-    Callable,
-    Mapping,
-    MutableMapping,
     NotRequired,
     Protocol,
     TypedDict,
@@ -76,7 +73,7 @@ JsonAble = Union[
 ]
 
 LogId = Mapping[str, str]
-MaybeAwaitable = TypeVar("MaybeAwaitable", bound=Union[Any, Awaitable[Any]])
+MaybeAwaitable = TypeVar("MaybeAwaitable", bound=Any | Awaitable[Any])
 
 
 # ======================================================================
@@ -91,7 +88,7 @@ class ErrorDetails:
     details: str | None = None
     data: Mapping[str, JsonAble] | None = None
     trace: str | None = None
-    cause: "ErrorObject" | None = None
+    cause: ErrorObject | None = None
 
 
 @dataclass(frozen=True)
@@ -120,7 +117,7 @@ LogFunction = Callable[[LogMessage], Any]
 
 
 class LogMethod(Protocol):
-    def __call__(self, context: "CommonContext") -> LogFunction: ...
+    def __call__(self, context: CommonContext) -> LogFunction: ...
 
 
 # ======================================================================
@@ -178,16 +175,16 @@ class Logger(Protocol):
         options: LogInstanceOptions | None = None,
     ) -> Any: ...
 
-    def apply_data(self, data: Mapping[str, JsonAble]) -> "Logger": ...
+    def apply_data(self, data: Mapping[str, JsonAble]) -> Logger: ...
 
     def get_id_logger(
         self,
         name: str,
         log_id_or_key: LogId | str,
         id: str | None = None,
-    ) -> "Logger": ...
+    ) -> Logger: ...
 
-    def get_sub_logger(self, name: str) -> "Logger": ...
+    def get_sub_logger(self, name: str) -> Logger: ...
 
     def get_ids(self) -> list[LogId]: ...
 
@@ -242,7 +239,7 @@ class HighLevelLogger(Logger, Protocol):
 class RootLogger(Protocol):
     def get_logger(
         self,
-        context: "CommonContext",
+        context: CommonContext,
         props: Mapping[str, Any] | None = None,
     ) -> HighLevelLogger: ...
 
@@ -261,15 +258,18 @@ class CoreLoggingConfig:
     custom_logger: RootLogger | None = None
 
     # domain -> (bool | (layer -> (bool | (function -> bool))))
-    ignore_layer_functions: Mapping[
-        str,
-        bool | Mapping[str, bool | Mapping[str, bool]],
-    ] | None = None
+    ignore_layer_functions: (
+        Mapping[
+            str,
+            bool | Mapping[str, bool | Mapping[str, bool]],
+        ]
+        | None
+    ) = None
 
     # (layerName, functionName?) -> logLevel
-    get_function_wrap_log_level: (
-        Callable[[str, str | None], LogLevelNames] | None
-    ) = None
+    get_function_wrap_log_level: Callable[[str, str | None], LogLevelNames] | None = (
+        None
+    )
 
 
 # ======================================================================
@@ -295,7 +295,7 @@ LayerDescription = Union[str, list[str]]
 class CoreConfig:
     logging: CoreLoggingConfig
     layer_order: list[LayerDescription]
-    apps: list["App"]               # like TS `apps: readonly App[]`
+    apps: list[App]  # like TS `apps: readonly App[]`
     model_factory: str | None = None
     model_cruds: bool = False
     custom_model_factory: Mapping[str, Any] | None = None
@@ -335,6 +335,7 @@ class FeaturesContext(LayerContext, total=False):
 # Placeholder protocol for model constructors/factories, since you said
 # "ignore any TS types that aren't represented"; this stays minimal.
 
+
 class ModelConstructor(Protocol):
     def create(self, *args: Any, **kwargs: Any) -> Any: ...
 
@@ -352,9 +353,9 @@ class App(TypedDict, total=False):
     # Each is a "layer factory": a module-like object with `create(context)`.
 
     # A generic layer: `create(LayerContext) -> layer instance`
-    services: "AppLayer"
-    features: "AppLayer"
-    globals: "GlobalsLayer"
+    services: AppLayer
+    features: AppLayer
+    globals: GlobalsLayer
     models: Mapping[str, ModelConstructor]
 
 
