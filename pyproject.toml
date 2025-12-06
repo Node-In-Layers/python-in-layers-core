@@ -1,0 +1,188 @@
+[project]
+name = "in-layers-python"
+version = "0.1.0"
+description = "The Python port of Node in Layers Core."
+authors = [
+    {name = "Mike Cornwell",email = "mike@mikecornwell.com"}
+]
+license = {text = "GPLv3"}
+readme = "README.md"
+homepage = "https://github.com/node-in-layers/python-in-layers-core"  
+repository = "https://github.com/node-in-layers/python-in-layers-core"
+keywords = ["layers", "python", "in-layers", "node", "domains"]
+requires-python = ">=3.14"
+dependencies = [
+]
+
+[tool.poetry]
+name = "in-layers-python"
+version = "0.1.0"
+description = ""
+authors = []
+packages = [
+    { include = "in_layers", from = "src" }
+]
+
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "black>=24.0.0",
+    "ruff>=0.7.0",
+    "isort>=5.12.0",
+    "mypy>=1.12.0",
+    "pytest>=8.0.0",
+    "commitizen (>=3.14,<4.0)",
+]
+
+[tool.poetry.dependencies]
+python = ">=3.14"
+python-box = ">=7,<9"
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+lines_after_imports = 2
+
+
+# ================================================================
+# BLACK (code formatting)
+# ================================================================
+[tool.black]
+line-length = 88
+target-version = ["py313"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | venv
+  | build
+  | dist
+  | __pycache__
+  | \.mypy_cache
+  | \.ruff_cache
+)/
+'''
+
+# ================================================================
+# RUFF (linting + import sorting + auto-fixes)
+# ================================================================
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+# Run Ruff from the root; it will traverse all subdirs except excluded.
+exclude = [
+  ".git",
+  ".venv",
+  "venv",
+  "__pycache__",
+  "build",
+  "dist",
+  ".mypy_cache",
+  ".ruff_cache",
+  "tests",
+  "*/tests",
+  "**/tests"
+]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # Pyflakes
+  "B",   # flake8-bugbear (common bugs / bad patterns)
+  "I",   # isort (import sorting)
+  "UP",  # pyupgrade (modern syntax)
+  "N",   # pep8-naming (function, class, etc. naming)
+  "C90", # mccabe (complexity)
+  "SIM", # flake8-simplify
+  "S",   # flake8-bandit (basic security checks)
+  "DTZ", # flake8-datetimez (timezone-aware datetimes)
+  "T20", # flake8-print (no stray prints in non-test code)
+  "ARG", # flake8-unused-arguments
+  "PL",  # pylint-like checks (subset)
+  "RUF", # Ruff-specific rules
+]
+
+# Rules we choose to ignore or relax:
+ignore = [
+  "E501",  # Let Black handle line length
+  "W291",  # Trailing whitespace (Black fixes this)
+]
+
+# Per-file ignore examples (customize as desired):
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = [
+  "S101",   # Allow 'assert' in tests
+  "T201",   # Allow 'print' in tests if you wish
+]
+"orchestration/scripts/**" = [
+  "T201",   # Allow print in CLI-style scripts
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+# Optionally enable Ruff as a formatter (complementing Black):
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+# -------------------------------------------------------------------
+# Mypy configuration (type checking / "code lensing")
+# -------------------------------------------------------------------
+[tool.mypy]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+disallow_untyped_defs = true        # Functions must be typed
+disallow_incomplete_defs = true     # Arguments & returns must be fully typed
+disallow_untyped_calls = false      # Relaxed for now; can tighten later
+disallow_untyped_decorators = false
+no_implicit_optional = true
+strict_equality = true
+show_error_codes = true
+pretty = true
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | build
+  | dist
+  | __pycache__
+  | \.mypy_cache
+  | tmp
+)/
+'''
+
+# Optional: per-module/per-package overrides
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
+# -------------------------------------------------------------------
+# Pytest configuration (unit tests)
+# -------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q"
+python_files = [
+    "test_*.py",
+    "*_test.py",
+    "test_*.py",
+    "*-test.py",
+]
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "$version"
+version_scheme = "pep440"
+version_provider = "pep621"
