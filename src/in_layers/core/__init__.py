@@ -20,7 +20,6 @@ from .libs import (  # noqa: F401
     validate_config,
 )
 from .protocols import (  # noqa: F401
-    App,
     AppLayer,
     CommonContext,
     Config,
@@ -28,8 +27,10 @@ from .protocols import (  # noqa: F401
     CoreLoggingConfig,
     CoreNamespace,
     CrossLayerProps,
+    Domain,
     FeaturesContext,
     FunctionLogger,
+    GlobalsServicesProps,
     HighLevelLogger,
     LayerContext,
     LayerDescription,
@@ -45,6 +46,7 @@ from .protocols import (  # noqa: F401
 )
 
 __all__ = [
+    "SystemProps",
     "composite_logger",
     "console_log_full",
     "console_log_json",

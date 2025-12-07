@@ -22,7 +22,9 @@ def _ctx(logging_cfg: Mapping[str, Any]) -> Box:
                 "runtime_id": "RID",
                 "working_directory": "/tmp",
             },
-        }
+        },
+        default_box=True,
+        default_box_attr=None,
     )
 
 

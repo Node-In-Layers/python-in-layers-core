@@ -18,7 +18,6 @@ from ..protocols import (
     AppLogger,
     CommonContext,
     CommonLayerName,
-    CoreNamespace,
     CrossLayerProps,
     HighLevelLogger,
     LayerLogger,
@@ -39,6 +38,21 @@ from .libs import (
 )
 
 MAX_LOGGING_ATTEMPTS = 5
+DEFAULT_MAX_LOG_SIZE_IN_CHARACTERS = 50000
+
+
+def _setup_python_logging(level: int) -> None:
+    root = logging.getLogger()
+    root.setLevel(level)
+    fmt = logging.Formatter("%(message)s")
+    for h in root.handlers:
+        h.setFormatter(fmt)
+
+    if not root.handlers:
+        h = logging.StreamHandler()
+        h.setLevel(level)
+        h.setFormatter(logging.Formatter("%(message)s"))
+        root.addHandler(h)
 
 
 def _to_std_level(name: LogLevelNames | None) -> int:
@@ -103,13 +117,11 @@ def console_log_json(log_message: LogMessage) -> None:
 
 
 def log_tcp(context: CommonContext) -> Callable[[LogMessage], Any]:
-    tcp_options = context.config[CoreNamespace.root.value].logging.get(
-        "tcp_logging_options"
-    )
+    tcp_options = context.config.in_layers_core.logging.tcp_logging_options
     if not tcp_options:
         raise ValueError("Must include tcp_logging_options when using a tcp logger")
-    url = tcp_options["url"]
-    headers = tcp_options.get("headers", {})
+    url = tcp_options.url
+    headers = tcp_options.headers or {}
     client = httpx.Client(base_url=url, headers=headers)
 
     def _send(log_message: LogMessage) -> Any:
@@ -158,6 +170,43 @@ def _get_log_methods_from_format(
     raise ValueError(f"LogFormat {log_format} is not supported")
 
 
+class _HL(HighLevelLogger):  # type: ignore[misc]
+    def __init__(self, context: CommonContext, sub: Logger):
+        self.context = context
+        self.sub = sub
+
+    def get_app_logger(self, app_name: str) -> AppLogger:
+        return _app_logger(self.context, self.sub, app_name)
+
+    # Logger methods forwarded
+    def trace(self, *a, **k):
+        return self.sub.trace(*a, **k)
+
+    def debug(self, *a, **k):
+        return self.sub.debug(*a, **k)
+
+    def info(self, *a, **k):
+        return self.sub.info(*a, **k)
+
+    def warn(self, *a, **k):
+        return self.sub.warn(*a, **k)
+
+    def error(self, *a, **k):
+        return self.sub.error(*a, **k)
+
+    def apply_data(self, *a, **k):
+        return self.sub.apply_data(*a, **k)
+
+    def get_id_logger(self, *a, **k):
+        return self.sub.get_id_logger(*a, **k)
+
+    def get_sub_logger(self, *a, **k):
+        return self.sub.get_sub_logger(*a, **k)
+
+    def get_ids(self):
+        return self.sub.get_ids()
+
+
 def composite_logger(log_methods: Sequence[LogMethod]) -> RootLogger:
     def get_logger(
         context: CommonContext, props: Mapping[str, Any] | None = None
@@ -168,40 +217,7 @@ def composite_logger(log_methods: Sequence[LogMethod]) -> RootLogger:
             list(log_methods),
             {"names": [], "ids": ids, "data": dict(props or {}).get("data", {})},
         )
-
-        class _HL(HighLevelLogger):  # type: ignore[misc]
-            def get_app_logger(self, app_name: str) -> AppLogger:
-                return _app_logger(context, sub, app_name)
-
-            # Logger methods forwarded
-            def trace(self, *a, **k):
-                return sub.trace(*a, **k)
-
-            def debug(self, *a, **k):
-                return sub.debug(*a, **k)
-
-            def info(self, *a, **k):
-                return sub.info(*a, **k)
-
-            def warn(self, *a, **k):
-                return sub.warn(*a, **k)
-
-            def error(self, *a, **k):
-                return sub.error(*a, **k)
-
-            def apply_data(self, *a, **k):
-                return sub.apply_data(*a, **k)
-
-            def get_id_logger(self, *a, **k):
-                return sub.get_id_logger(*a, **k)
-
-            def get_sub_logger(self, *a, **k):
-                return sub.get_sub_logger(*a, **k)
-
-            def get_ids(self):
-                return sub.get_ids()
-
-        return _HL()
+        return _HL(context, sub)
 
     class _Root(RootLogger):  # type: ignore[misc]
         def get_logger(
@@ -217,35 +233,45 @@ def standard_logger() -> RootLogger:
         def get_logger(
             self, context: CommonContext, props: Mapping[str, Any] | None = None
         ) -> HighLevelLogger:
-            logging_cfg = context.config[CoreNamespace.root.value].logging
-            custom = logging_cfg.get("custom_logger")
+            _setup_python_logging(
+                _to_std_level(context.config.in_layers_core.logging.log_level)
+            )
+            logging_cfg = context.config.in_layers_core.logging
+            custom = logging_cfg.get("custom_logger", None)
             if custom:
-                ids = _get_ids_with_runtime(context.constants["runtime_id"], props)
+                ids = _get_ids_with_runtime(context.constants.runtime_id, props)
                 return custom.get_logger(context, {**(props or {}), "ids": ids})
-            methods = _get_log_methods_from_format(logging_cfg["log_format"])
+            methods = _get_log_methods_from_format(logging_cfg.log_format)
             return composite_logger(methods).get_logger(context, props)
 
     return _Root()
 
 
-def _sub_logger(
-    context: CommonContext,
-    log_methods: list[LogMethod],
-    props: dict[str, Any],
-) -> Logger:
-    config_level: LogLevelNames = context.config[CoreNamespace.root.value].logging[
-        "log_level"
-    ]
-    bound_methods: list[Callable[[LogMessage], Any]] = [m(context) for m in log_methods]
+class _Logger(Logger):  # type: ignore[misc]
+    def __init__(
+        self,
+        context: CommonContext,
+        log_methods: list[LogMethod],
+        props: dict[str, Any],
+    ):
+        self.context = context
+        self.props = props
+        self.config_level: LogLevelNames = (
+            context.config.in_layers_core.logging.log_level
+        )
+        self.bound_methods: list[Callable[[LogMessage], Any]] = [
+            m(context) for m in log_methods
+        ]
+        self.log_methods = log_methods
 
-    def _do_log(message_level: LogLevelNames):
+    def _do_log(self, message_level: LogLevelNames):
         def _f(
             message: str,
             data_or_error: Mapping[str, Any] | None = None,
             *,
             ignore_size_limit: bool = False,
         ) -> Any:
-            if _should_ignore(config_level, message_level):
+            if _should_ignore(self.config_level, message_level):
                 return None
             is_error = isinstance(data_or_error, Mapping) and "error" in (
                 data_or_error or {}
@@ -256,165 +282,170 @@ def _sub_logger(
                 if ignore_size_limit
                 else cap_for_logging(
                     data,
-                    context.config[CoreNamespace.root.value].logging.get(
-                        "max_log_size_in_characters", 50000
-                    ),
+                    self.context.config.in_layers_core.logging.get(
+                        "max_log_size_in_characters", DEFAULT_MAX_LOG_SIZE_IN_CHARACTERS
+                    )
+                    or 50000,
                 )
             )
             log_message: LogMessage = {
                 "id": str(uuid.uuid4()),
-                "environment": context.constants["environment"],
+                "environment": self.context.constants["environment"],
                 "datetime": datetime.now(tz=UTC),
                 "log_level": message_level,
                 "message": message,
-                "ids": props.get("ids"),
-                "logger": ":".join(props.get("names", [])),
+                "ids": self.props.get("ids"),
+                "logger": ":".join(self.props.get("names", [])),
                 **({"error": data_or_error["error"]} if is_error else {}),
                 **the_data,
             }  # type: ignore[typeddict-item]
-            [bm(log_message) for bm in bound_methods]
+            [bm(log_message) for bm in self.bound_methods]
             return None
 
         return _f
 
-    class _Logger(Logger):  # type: ignore[misc]
-        def get_ids(self) -> list[LogId]:
-            return list(props.get("ids") or [])
+    def get_ids(self) -> list[LogId]:
+        return list(self.props.get("ids") or [])
 
-        def debug(self, *a, **k):
-            return _do_log(LogLevelNames.debug)(*a, **k)
+    def debug(self, *a, **k):
+        return self._do_log(LogLevelNames.debug)(*a, **k)
 
-        def info(self, *a, **k):
-            return _do_log(LogLevelNames.info)(*a, **k)
+    def info(self, *a, **k):
+        return self._do_log(LogLevelNames.info)(*a, **k)
 
-        def warn(self, *a, **k):
-            return _do_log(LogLevelNames.warn)(*a, **k)
+    def warn(self, *a, **k):
+        return self._do_log(LogLevelNames.warn)(*a, **k)
 
-        def trace(self, *a, **k):
-            return _do_log(LogLevelNames.debug)(*a, **k)
+    def trace(self, *a, **k):
+        return self._do_log(LogLevelNames.debug)(*a, **k)
 
-        def error(self, *a, **k):
-            return _do_log(LogLevelNames.error)(*a, **k)
+    def error(self, *a, **k):
+        return self._do_log(LogLevelNames.error)(*a, **k)
 
-        def get_sub_logger(self, name: str) -> Logger:
-            return _sub_logger(
-                context,
-                log_methods,
-                {**props, "names": [*props.get("names", []), name]},
-            )
+    def get_sub_logger(self, name: str) -> Logger:
+        return _sub_logger(
+            self.context,
+            self.log_methods,
+            {**self.props, "names": [*self.props.get("names", []), name]},
+        )
 
-        def get_id_logger(
-            self, name: str, log_id_or_key: LogId | str, id: str | None = None
-        ) -> Logger:
-            if not isinstance(log_id_or_key, Mapping) and not id:
-                raise ValueError("Need value if providing a key")
-            log_id: LogId = (
-                log_id_or_key
-                if isinstance(log_id_or_key, Mapping)
-                else {str(log_id_or_key): str(id or "")}
-            )
-            ids = [*props.get("ids", []), log_id]
-            return _sub_logger(
-                context,
-                log_methods,
-                {**props, "names": [*props.get("names", []), name], "ids": ids},
-            )
+    def get_id_logger(
+        self, name: str, log_id_or_key: LogId | str, id: str | None = None
+    ) -> Logger:
+        if not isinstance(log_id_or_key, Mapping) and not id:
+            raise ValueError("Need value if providing a key")
+        log_id: LogId = (
+            log_id_or_key
+            if isinstance(log_id_or_key, Mapping)
+            else {str(log_id_or_key): str(id or "")}
+        )
+        ids = [*self.props.get("ids", []), log_id]
+        return _sub_logger(
+            self.context,
+            self.log_methods,
+            {**self.props, "names": [*self.props.get("names", []), name], "ids": ids},
+        )
 
-        def apply_data(self, data: Mapping[str, Any]) -> Logger:
-            merged = dict(props)
-            merged.update(data)
-            if "ids" not in data:
-                merged["ids"] = props.get("ids")
-            return _sub_logger(context, log_methods, merged)
+    def apply_data(self, data: Mapping[str, Any]) -> Logger:
+        merged = dict(self.props)
+        merged.update(data)
+        if "ids" not in data:
+            merged["ids"] = self.props.get("ids")
+        return _sub_logger(self.context, self.log_methods, merged)
 
-    return _Logger()
+
+def _sub_logger(
+    context: CommonContext,
+    log_methods: list[LogMethod],
+    props: dict[str, Any],
+) -> Logger:
+    return _Logger(context, log_methods, props)
+
+
+class _AppLoggerImpl(AppLogger):  # type: ignore[misc]
+    def __init__(self, ctx: CommonContext, base_logger: Logger):
+        self._ctx = ctx
+        self._base = base_logger
+
+    def get_layer_logger(
+        self,
+        layer_name: CommonLayerName | str,
+        cross_layer_props: CrossLayerProps | None = None,
+    ) -> LayerLogger:
+        return _layer_logger(self._ctx, self._base, str(layer_name), cross_layer_props)
+
+    def trace(self, *a, **k):
+        return self._base.trace(*a, **k)
+
+    def debug(self, *a, **k):
+        return self._base.debug(*a, **k)
+
+    def info(self, *a, **k):
+        return self._base.info(*a, **k)
+
+    def warn(self, *a, **k):
+        return self._base.warn(*a, **k)
+
+    def error(self, *a, **k):
+        return self._base.error(*a, **k)
+
+    def apply_data(self, *a, **k):
+        return self._base.apply_data(*a, **k)
+
+    def get_id_logger(self, *a, **k):
+        return self._base.get_id_logger(*a, **k)
+
+    def get_sub_logger(self, *a, **k):
+        return self._base.get_sub_logger(*a, **k)
+
+    def get_ids(self):
+        return self._base.get_ids()
 
 
 def _app_logger(context: CommonContext, sub_logger: Logger, app_name: str) -> AppLogger:
     the_logger = sub_logger.get_sub_logger(app_name).apply_data({"app": app_name})
-
-    class _AL(AppLogger):  # type: ignore[misc]
-        def get_layer_logger(
-            self,
-            layer_name: CommonLayerName | str,
-            cross_layer_props: CrossLayerProps | None = None,
-        ) -> LayerLogger:
-            return _layer_logger(
-                context, the_logger, str(layer_name), cross_layer_props
-            )
-
-        def trace(self, *a, **k):
-            return the_logger.trace(*a, **k)
-
-        def debug(self, *a, **k):
-            return the_logger.debug(*a, **k)
-
-        def info(self, *a, **k):
-            return the_logger.info(*a, **k)
-
-        def warn(self, *a, **k):
-            return the_logger.warn(*a, **k)
-
-        def error(self, *a, **k):
-            return the_logger.error(*a, **k)
-
-        def apply_data(self, *a, **k):
-            return the_logger.apply_data(*a, **k)
-
-        def get_id_logger(self, *a, **k):
-            return the_logger.get_id_logger(*a, **k)
-
-        def get_sub_logger(self, *a, **k):
-            return the_logger.get_sub_logger(*a, **k)
-
-        def get_ids(self):
-            return the_logger.get_ids()
-
-    return _AL()
+    return _AppLoggerImpl(context, the_logger)
 
 
-def _layer_logger(
-    context: CommonContext,
-    sub_logger: Logger,
-    layer_name: CommonLayerName | str,
-    cross_layer_props: CrossLayerProps | None = None,
-) -> LayerLogger:
-    inner = sub_logger.get_sub_logger(str(layer_name)).apply_data(
-        {"layer": str(layer_name)}
-    )
-    the_logger = inner.apply_data(combine_logging_props(inner, cross_layer_props))
+class _LayerLoggerImpl(LayerLogger):  # type: ignore[misc]
+    def __init__(self, ctx: CommonContext, lname: str, base: Logger):
+        self._ctx = ctx
+        self._layer = lname
+        self._base = base
 
     def get_function_logger(
-        function_name: str, cross: CrossLayerProps | None = None
+        self, name: str, cross_layer_props: CrossLayerProps | None = None
     ) -> Logger:
-        func_logger = the_logger.get_id_logger(
-            function_name, "function_call_id", str(uuid.uuid4())
-        ).apply_data({"function": function_name})
+        func_logger = self._base.get_id_logger(
+            name, "function_call_id", str(uuid.uuid4())
+        ).apply_data({"function": name})
         combined = combine_cross_layer_props(
             {"logging": {"ids": func_logger.get_ids()}},
-            cross or {"logging": {"ids": []}},
+            cross_layer_props or {"logging": {"ids": []}},
         )
         return func_logger.apply_data(combined["logging"])
 
     def get_inner_logger(
-        function_name: str, cross: CrossLayerProps | None = None
+        self, function_name: str, cross_layer_props: CrossLayerProps | None = None
     ) -> Logger:
-        func_logger = the_logger.get_sub_logger(function_name).apply_data(
+        func_logger = self._base.get_sub_logger(function_name).apply_data(
             {"function": function_name}
         )
         combined = combine_cross_layer_props(
             {"logging": {"ids": func_logger.get_ids()}},
-            cross or {"logging": {"ids": []}},
+            cross_layer_props or {"logging": {"ids": []}},
         )
         return func_logger.apply_data(combined["logging"])
 
-    def _log_wrap(function_name: str, func: Callable[..., Any]) -> Callable[..., Any]:
-        layer = str(layer_name)
+    def _log_wrap(
+        self, function_name: str, func: Callable[..., Any]
+    ) -> Callable[..., Any]:
+        layer = self._layer
 
         def _wrapped(*args: Any, **kwargs: Any) -> Any:  # noqa: ARG001
             args_no_cross, cross = extract_cross_layer_props(list(args))
-            flog = get_function_logger(function_name, cross)
-            level = _get_wrap_level(context, layer, function_name)
+            flog = self.get_function_logger(function_name, cross)
+            level = _get_wrap_level(self._ctx, layer, function_name)
             getattr(flog, level)(f"Executing {layer} function", {"args": args_no_cross})
             try:
                 result = func(
@@ -433,66 +464,55 @@ def _layer_logger(
 
         return _wrapped
 
-    def _wrap_async(function_name: str, func: Callable[..., Any]) -> Callable[..., Any]:
-        return _log_wrap(function_name, func)
+    def _log_wrap_async(
+        self, function_name: str, func: Callable[..., Any]
+    ) -> Callable[..., Any]:
+        return self._log_wrap(function_name, func)
 
-    def _wrap_sync(function_name: str, func: Callable[..., Any]) -> Callable[..., Any]:
-        return _log_wrap(function_name, func)
+    def _log_wrap_sync(
+        self, function_name: str, func: Callable[..., Any]
+    ) -> Callable[..., Any]:
+        return self._log_wrap(function_name, func)
 
-    class _LL(LayerLogger):  # type: ignore[misc]
-        def get_function_logger(
-            self, name: str, cross_layer_props: CrossLayerProps | None = None
-        ) -> Logger:
-            return get_function_logger(name, cross_layer_props)
+    def trace(self, *a, **k):
+        return self._base.trace(*a, **k)
 
-        def get_inner_logger(
-            self, function_name: str, cross_layer_props: CrossLayerProps | None = None
-        ) -> Logger:
-            return get_inner_logger(function_name, cross_layer_props)
+    def debug(self, *a, **k):
+        return self._base.debug(*a, **k)
 
-        def _log_wrap(
-            self, function_name: str, func: Callable[..., Any]
-        ) -> Callable[..., Any]:
-            return _log_wrap(function_name, func)
+    def info(self, *a, **k):
+        return self._base.info(*a, **k)
 
-        def _log_wrap_async(
-            self, function_name: str, func: Callable[..., Any]
-        ) -> Callable[..., Any]:
-            return _wrap_async(function_name, func)
+    def warn(self, *a, **k):
+        return self._base.warn(*a, **k)
 
-        def _log_wrap_sync(
-            self, function_name: str, func: Callable[..., Any]
-        ) -> Callable[..., Any]:
-            return _wrap_sync(function_name, func)
+    def error(self, *a, **k):
+        return self._base.error(*a, **k)
 
-        def trace(self, *a, **k):
-            return the_logger.trace(*a, **k)
+    def apply_data(self, *a, **k):
+        return self._base.apply_data(*a, **k)
 
-        def debug(self, *a, **k):
-            return the_logger.debug(*a, **k)
+    def get_id_logger(self, *a, **k):
+        return self._base.get_id_logger(*a, **k)
 
-        def info(self, *a, **k):
-            return the_logger.info(*a, **k)
+    def get_sub_logger(self, *a, **k):
+        return self._base.get_sub_logger(*a, **k)
 
-        def warn(self, *a, **k):
-            return the_logger.warn(*a, **k)
+    def get_ids(self):
+        return self._base.get_ids()
 
-        def error(self, *a, **k):
-            return the_logger.error(*a, **k)
 
-        def apply_data(self, *a, **k):
-            return the_logger.apply_data(*a, **k)
-
-        def get_id_logger(self, *a, **k):
-            return the_logger.get_id_logger(*a, **k)
-
-        def get_sub_logger(self, *a, **k):
-            return the_logger.get_sub_logger(*a, **k)
-
-        def get_ids(self):
-            return the_logger.get_ids()
-
-    return _LL()
+def _layer_logger(
+    context: CommonContext,
+    sub_logger: Logger,
+    layer_name: CommonLayerName | str,
+    cross_layer_props: CrossLayerProps | None = None,
+) -> LayerLogger:
+    inner = sub_logger.get_sub_logger(str(layer_name)).apply_data(
+        {"layer": str(layer_name)}
+    )
+    the_logger = inner.apply_data(combine_logging_props(inner, cross_layer_props))
+    return _LayerLoggerImpl(context, str(layer_name), the_logger)
 
 
 def _get_ids_with_runtime(
@@ -509,14 +529,8 @@ def _get_ids_with_runtime(
 def _get_wrap_level(
     context: CommonContext, layer_name: str, function_name: str | None
 ) -> str:
-    getter = (
-        context["config"][CoreNamespace.root.value]["logging"].get(
-            "get_function_wrap_log_level"
-        )
-        if context
-        and "config" in context
-        and context["config"].get(CoreNamespace.root.value)
-        else None
+    getter = context.config.in_layers_core.logging.get(
+        "get_function_wrap_log_level", None
     )
     level = (
         getter(layer_name, function_name)

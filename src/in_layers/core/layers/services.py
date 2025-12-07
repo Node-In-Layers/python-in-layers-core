@@ -1,22 +1,17 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
-
-from ..protocols import ServicesContext
+from ..protocols import Domain, LayerContext, ServicesContext
 
 
 class LayersServices:
     def get_model_props(self, context: ServicesContext):
         raise NotImplementedError("Model support not implemented in Python port")
 
-    def load_layer(
-        self, app: Mapping[str, Any], layer: str, context: Mapping[str, Any]
-    ):
-        constructor = app.get(layer)
-        if not constructor or "create" not in constructor:
+    def load_layer(self, app: Domain, layer: str, context: LayerContext):
+        layer_instance = getattr(app, layer, None)
+        if not layer_instance or not hasattr(layer_instance, "create"):
             return None
-        instance = constructor.create(context)
+        instance = layer_instance.create(context)
         if instance is None:
             raise RuntimeError(
                 f"App {app.get('name')} did not return an instance layer {layer}"

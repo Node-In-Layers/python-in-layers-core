@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from types import SimpleNamespace
 
+from box import Box
 from in_layers.core.entries import load_system, SystemProps
-from in_layers.core.protocols import CoreNamespace, LogFormat, LogLevelNames
+from in_layers.core.protocols import (
+    CoreConfig,
+    CoreLoggingConfig,
+    LogFormat,
+    LogLevelNames,
+)
+from in_layers.core.protocols import Domain, Config
 
 
 def _config():
@@ -40,26 +48,27 @@ def _config():
     def features_create(ctx):
         return DemoFeatures(ctx)
 
-    return {
-        "system_name": "test",
-        "environment": "test",
-        CoreNamespace.root.value: {
-            "logging": {
-                "log_level": LogLevelNames.info,
-                "log_format": LogFormat.simple,
-            },
+    class DemoDomain(Domain):
+        name = "demo"
+        first_layer = SimpleNamespace(create=first_create)
+        second_layer = SimpleNamespace(create=second_create)
+        features = SimpleNamespace(create=features_create)
+
+    return Box(
+        system_name="test",
+        environment="test",
+        in_layers_core=Box(
+            logging=Box(
+                log_level=LogLevelNames.info,
+                log_format=LogFormat.simple,
+            ),
             # composite layer with two sub-layers 'first' and 'second'
-            "layer_order": ["services", ["first_layer", "second_layer"], "features"],
-            "apps": [
-                {
-                    "name": "demo",
-                    "first_layer": {"create": first_create},
-                    "second_layer": {"create": second_create},
-                    "features": {"create": features_create},
-                }
+            layer_order=["services", ["first_layer", "second_layer"], "features"],
+            domains=[
+                DemoDomain,
             ],
-        },
-    }
+        ),
+    )
 
 
 def test_composite_layers_output_correct():

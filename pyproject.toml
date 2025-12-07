@@ -1,6 +1,6 @@
 [project]
 name = "in-layers-core"
-version = "0.1.10"
+version = "0.2.10"
 description = "The Python port of Node in Layers Core."
 authors = [
     {name = "Mike Cornwell",email = "mike@mikecornwell.com"}
@@ -136,6 +136,9 @@ ignore = [
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 8
 
 # Optionally enable Ruff as a formatter (complementing Black):
 [tool.ruff.format]

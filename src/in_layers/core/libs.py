@@ -90,14 +90,15 @@ def _flatten_layers(layers: Sequence[LayerDescription]) -> list[str]:
 
 
 def is_config(obj: Any) -> bool:
-    if isinstance(obj, str):
+    if type(obj) is str:
         return False
-    try:
-        core = obj[CoreNamespace.root]  # type: ignore[index]
-        _ = core["layer_order"]
-        return True
-    except Exception:
-        return False
+    if isinstance(obj, dict):
+        try:
+            validate_config(obj)
+            return True
+        except ValueError:
+            return False
+    return False
 
 
 def validate_config(config: Mapping[str, Any]) -> None:
@@ -105,7 +106,7 @@ def validate_config(config: Mapping[str, Any]) -> None:
         cur: Any = config
         for key in path:
             key_s = key.value if isinstance(key, CoreNamespace) else key
-            if not isinstance(cur, Mapping) or key_s not in cur:
+            if key_s not in cur:
                 raise ValueError(f"{'.'.join(map(str, path))} was not found in config")
             cur = cur[key_s]
         if type_ is not None and not isinstance(cur, type_):
@@ -115,17 +116,19 @@ def validate_config(config: Mapping[str, Any]) -> None:
 
     _require(["environment"])
     _require(["system_name"])
-    _require([CoreNamespace.root, "apps"])
-    if not isinstance(config[CoreNamespace.root.value]["apps"], list):
-        raise ValueError(f"{CoreNamespace.root.value}.apps must be an array")
-    _require([CoreNamespace.root, "layer_order"])
-    if not isinstance(config[CoreNamespace.root.value]["layer_order"], list):
-        raise ValueError(f"{CoreNamespace.root.value}.layer_order must be an array")
-    _require([CoreNamespace.root, "logging", "log_level"])
-    _require([CoreNamespace.root, "logging", "log_format"])
-    for app in config[CoreNamespace.root.value]["apps"]:
-        if not isinstance(app, Mapping) or "name" not in app:
-            raise ValueError("A configured app does not have a name.")
+    _require([CoreNamespace.root.value, "domains"])
+    if not isinstance(config.in_layers_core.domains, list):
+        raise ValueError(f"{CoreNamespace.root.value}.domains must be an array")
+    _require([CoreNamespace.root.value, "layer_order"])
+    if not isinstance(config.in_layers_core.layer_order, list):
+        raise ValueError(f"{CoreNamespace.root}.layer_order must be an array")
+    _require([CoreNamespace.root.value, "logging", "log_level"])
+    _require([CoreNamespace.root.value, "logging", "log_format"])
+    for domain in config.in_layers_core.domains:
+        try:
+            name = domain.name  # noqa: F841
+        except AttributeError as e:
+            raise ValueError("A configured domain does not have a name.") from e
 
 
 def combine_cross_layer_props(

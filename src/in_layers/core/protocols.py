@@ -6,13 +6,12 @@ from enum import Enum
 from typing import (
     Any,
     Protocol,
-    TypedDict,
     TypeVar,
-    Union,
 )
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.dataclasses import dataclass
+from pydantic_core import core_schema
 
 # ======================================================================
 # Core enums
@@ -46,10 +45,10 @@ class LogFormat(str, Enum):
 
 
 class CoreNamespace(str, Enum):
-    root = "in-layers/core"
-    globals = "in-layers/core/globals"
-    layers = "in-layers/core/layers"
-    models = "in-layers/core/models"
+    root = "in_layers_core"
+    globals = "in_layers_core_globals"
+    layers = "in_layers_core_layers"
+    models = "in_layers_core_models"
 
 
 class CommonLayerName(str, Enum):
@@ -63,18 +62,10 @@ class CommonLayerName(str, Enum):
 # Generic helpers / aliases
 # ======================================================================
 
-JsonAble = Union[
-    None,
-    bool,
-    int,
-    float,
-    str,
-    Mapping[str, Any],
-    list[Any],
-]
+JsonAble = None | bool | int | float | str | Mapping[str, Any] | list[Any]
 
-LogId = Mapping[str, str]
 MaybeAwaitable = TypeVar("MaybeAwaitable", bound=Any | Awaitable[Any])
+LogId = Mapping[str, str]
 
 
 # ======================================================================
@@ -140,7 +131,6 @@ class CrossLayerLogging(BaseModel):
 class CrossLayerProps(BaseModel):
     model_config = ConfigDict(extra="allow")
     logging: CrossLayerLogging | None
-    # additional ad‑hoc fields are possible but not explicitly typed
 
 
 # ======================================================================
@@ -247,9 +237,7 @@ class HighLevelLogger(Logger, Protocol):
 
 class RootLogger(Protocol):
     def get_logger(
-        self,
-        context: CommonContext,
-        props: Mapping[str, Any] | None = None,
+        self, context: CommonContext, props: Mapping[str, Any] | None
     ) -> HighLevelLogger: ...
 
 
@@ -258,28 +246,16 @@ class RootLogger(Protocol):
 # ======================================================================
 
 
-@dataclass(frozen=True)
-class CoreLoggingConfig:
-    log_level: LogLevelNames = Field(..., description="The default log level.")
-    log_format: LogFormat | list[LogFormat] = Field(
-        ..., description="The log format or formats to use."
-    )
-    max_log_size_in_characters: int | None = Field(
-        None, description="The maximum log size in characters."
-    )
-    tcp_logging_options: Mapping[str, Any] | None = Field(
-        None, description="The TCP logging options."
-    )
-    custom_logger: Any | None = Field(None, description="The custom logger to use.")
-
-    # domain -> (bool | (layer -> (bool | (function -> bool))))
-    ignore_layer_functions: (
-        Mapping[str, bool | Mapping[str, bool | Mapping[str, bool]]] | None
-    ) = Field(None, description="The functions to ignore.")
+class CoreLoggingConfig(Protocol):
+    log_level: LogLevelNames
+    log_format: LogFormat | list[LogFormat]
+    max_log_size_in_characters: int | None
+    tcp_logging_options: Mapping[str, Any] | None
+    custom_logger: Any | None
+    # domain, domain.layer, domain.layer.functionName
+    ignore_layer_functions: list[str]
     # (layerName, functionName?) -> logLevel
-    get_function_wrap_log_level: Callable[[str, str | None], LogLevelNames] | None = (
-        Field(None, description="The function to get the log level for a function.")
-    )
+    get_function_wrap_log_level: Callable[[str, str | None], LogLevelNames] | None
 
 
 # ======================================================================
@@ -287,63 +263,55 @@ class CoreLoggingConfig:
 # ======================================================================
 
 
-class CommonConstants(TypedDict):
+@dataclass(frozen=True)
+class CommonConstants:
     environment: str
     working_directory: str
     runtime_id: str
 
 
 # Forward refs
-class App(TypedDict):  # defined fully below
-    ...
+class Domain(Protocol):
+    description: str | None = Field(None, description="The description of the domain.")
+    services: Any | None = Field(None, description="The services layer for the domain.")
+    features: Any | None = Field(None, description="The features layer for the domain.")
+    globals: Any | None = Field(None, description="The globals layer for the domain.")
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source, handler):
+        # Tell Pydantic to treat AppLayer as an opaque type
+        return core_schema.any_schema()
 
 
 LayerDescription = str | list[str]
 
 
-@dataclass(frozen=True)
-class CoreConfig:
-    logging: CoreLoggingConfig = Field(..., description="The logging configuration.")
-    layer_order: list[LayerDescription] = Field(
-        ..., description="The order of the layers to load."
-    )
-    domains: list[App] = Field(..., description="The domains/apps to load.")
-    model_factory: str | None = Field(
-        None,
-        description="The namespace to the domain.services that has a 'getModelProps()' function used for loading models.",
-    )
-    model_cruds: bool = Field(
-        False,
-        description="When true, wrappers are built around models to bubble up CRUDS interfaces for models through services and features.",
-    )
-    custom_model_factory: Mapping[str, Any] | None = Field(
-        None, description="Provides granular 'getModelProps()' for specific models."
-    )
+class CoreConfig(Protocol):
+    logging: CoreLoggingConfig
+    layer_order: list[LayerDescription]
+    domains: list[Domain]
+    model_factory: str | None
+    model_cruds: bool
+    custom_model_factory: Mapping[str, Any] | None
 
 
-class Config(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    system_name: str = Field(..., description="The name of the system.")
-    environment: str = Field(
-        ..., description="The environment the system is running in."
-    )
-    in_layers_core: CoreConfig = Field(..., description="The core configuration.")
+class Config(Protocol):
+    system_name: str
+    environment: str
+    in_layers_core: CoreConfig
 
 
-class CommonContext(BaseModel):
-    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
-    config: Config = Field(..., description="The configuration for the system.")
-    root_logger: Any = Field(..., description="The root logger for the system.")
-    constants: CommonConstants = Field(..., description="The constants for the system.")
+class CommonContext(Protocol):
+    config: Config
+    root_logger: Any
+    constants: CommonConstants
 
 
 class LayerContext(CommonContext):
-    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
-    log: Any
+    log: LayerLogger
 
 
 class ServicesContext(LayerContext):
-    models: Mapping[str, Mapping[str, Callable[[], Any]]]
     services: Mapping[str, Any]
 
 
@@ -352,33 +320,25 @@ class FeaturesContext(LayerContext):
     features: Mapping[str, Any]
 
 
-# ======================================================================
-# Core "App" (domain) shape
-# ======================================================================
-
-
-class Domain(BaseModel):
-    name: str = Field(..., description="The name of the domain.")
-    description: str | None = Field(None, description="The description of the domain.")
-    services: AppLayer | None = Field(
-        None, description="The services layer for the domain."
-    )
-    features: AppLayer | None = Field(
-        None, description="The features layer for the domain."
-    )
-    globals: GlobalsLayer | None = Field(
-        None, description="The globals layer for the domain."
-    )
-
-
 class AppLayer(Protocol):
     def create(self, context: CommonContext) -> Awaitable[Mapping[str, Any]]: ...
+
+    def __get_pydantic_core_schema__(self, source, handler):
+        # Tell Pydantic to treat AppLayer as an opaque type
+        return core_schema.any_schema()
 
 
 class GlobalsLayer(Protocol):
     def create(self, context: CommonContext) -> Awaitable[Mapping[str, Any]]: ...
 
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source, handler):
+        # Tell Pydantic to treat AppLayer as an opaque type
+        return core_schema.any_schema()
 
-class GlobalsServicesProps(TypedDict, total=False):
+
+@dataclass(frozen=True)
+class GlobalsServicesProps:
     environment: str
     working_directory: str
+    runtime_id: str | None = None
