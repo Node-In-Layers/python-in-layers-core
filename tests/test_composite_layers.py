@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from types import SimpleNamespace
 
@@ -72,20 +71,14 @@ def _config():
 
 
 def test_composite_layers_output_correct():
-    async def run():
-        sys = await load_system(SystemProps(environment="test", config=_config()))
-        out, _ = sys.features.demo.callBoth("X")
-        assert out == "1:X2:X"
-
-    asyncio.run(run())
+    sys = load_system(SystemProps(environment="test", config=_config()))
+    out, _ = sys.features.demo.callBoth("X")
+    assert out == "1:X2:X"
 
 
 def test_composite_layers_crosslayer_ids_present():
-    async def run():
-        sys = await load_system(SystemProps(environment="test", config=_config()))
-        _, cross = sys.features.demo.callBoth("X")
-        assert isinstance(cross, dict)
-        assert "logging" in cross
-        assert "ids" in cross["logging"]
-
-    asyncio.run(run())
+    sys = load_system(SystemProps(environment="test", config=_config()))
+    _, cross = sys.features.demo.callBoth("X")
+    assert isinstance(cross, dict)
+    assert "logging" in cross
+    assert "ids" in cross["logging"]

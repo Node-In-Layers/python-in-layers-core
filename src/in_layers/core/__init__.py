@@ -1,8 +1,8 @@
-from .entries import SystemProps, load_system
+from .entries import SystemProps, load_system  # noqa: F401
 from .globals.libs import (  # noqa: F401
     extract_cross_layer_props,
 )
-from .globals.logging import (
+from .globals.logging import (  # noqa: F401
     composite_logger,
     console_log_full,
     console_log_json,
@@ -28,6 +28,7 @@ from .protocols import (  # noqa: F401
     CoreNamespace,
     CrossLayerProps,
     Domain,
+    ErrorObject,
     FeaturesContext,
     FunctionLogger,
     GlobalsServicesProps,
@@ -44,14 +45,3 @@ from .protocols import (  # noqa: F401
     LogMethod,
     RootLogger,
 )
-
-__all__ = [
-    "SystemProps",
-    "composite_logger",
-    "console_log_full",
-    "console_log_json",
-    "console_log_simple",
-    "load_system",
-    "log_tcp",
-    "standard_logger",
-]

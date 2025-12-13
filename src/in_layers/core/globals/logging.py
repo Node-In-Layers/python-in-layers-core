@@ -442,15 +442,20 @@ class _LayerLoggerImpl(LayerLogger):  # type: ignore[misc]
     ) -> Callable[..., Any]:
         layer = self._layer
 
-        def _wrapped(*args: Any, **kwargs: Any) -> Any:  # noqa: ARG001
+        def _wrapped(*args: Any, **kwargs: Any) -> Any:
+            if kwargs:
+                raise ValueError("kwargs are not supported for layered functions")
+            # Extract cross-layer props from the last positional argument only
             args_no_cross, cross = extract_cross_layer_props(list(args))
             flog = self.get_function_logger(function_name, cross)
             level = _get_wrap_level(self._ctx, layer, function_name)
             getattr(flog, level)(f"Executing {layer} function", {"args": args_no_cross})
             try:
-                result = func(
-                    flog, *args_no_cross, {"logging": {"ids": flog.get_ids()}}
+                # Always provide the combined logging ids to the inner function wrapper
+                combined = combine_cross_layer_props(
+                    {"logging": {"ids": flog.get_ids()}}, cross or {}
                 )
+                result = func(flog, *args_no_cross, combined)
                 getattr(flog, level)(f"Executed {layer} function", {"result": result})
                 return result
             except Exception as e:

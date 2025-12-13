@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import inspect
 from collections.abc import Mapping
 from typing import Any
@@ -7,12 +8,44 @@ from typing import Any
 from box import Box
 
 from ..globals.libs import extract_cross_layer_props
-from ..libs import get_layers_unavailable
+from ..libs import combine_cross_layer_props, get_layers_unavailable
 from ..protocols import (
     CommonContext,
     CoreNamespace,
     FeaturesContext,
 )
+
+_CROSS_PARAM_NAMES = {
+    "crossLayer",
+    "cross_layer",
+    "crossLayerProps",
+    "cross_layer_props",
+}
+
+
+def _create_wrapper_with_metadata(original_func: Any, inner_callable: Any) -> Any:
+    """
+    Return a new wrapper with original_func's metadata/signature, adding
+    an optional cross_layer_props parameter when not explicitly present.
+    """
+    wrapped = functools.wraps(original_func)(inner_callable)
+    try:
+        sig = getattr(original_func, "__signature__", inspect.signature(original_func))
+        params = list(sig.parameters.values())
+        has_cross = any(p.name in _CROSS_PARAM_NAMES for p in params)
+        if not has_cross:
+            new_param = inspect.Parameter(
+                "cross_layer_props",
+                kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                default=None,
+            )
+            wrapped.__signature__ = sig.replace(parameters=[*params, new_param])
+        else:
+            wrapped.__signature__ = sig
+        wrapped.__wrapped__ = getattr(original_func, "__wrapped__", original_func)
+    except Exception:  # noqa: S110
+        pass
+    return wrapped
 
 
 def _iter_properties_for_wrap(obj: Any):
@@ -33,52 +66,41 @@ def _iter_properties_for_wrap(obj: Any):
 def _call_with_optional_cross(
     f,
     args_no_cross: list[Any],
-    kwargs: dict[str, Any],
     cross: Mapping[str, Any] | None,
 ):
-    if cross is None:
-        return f(*args_no_cross, **kwargs)
     sig = inspect.signature(f)
     params = list(sig.parameters.values())
-    has_var_positional = any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params)
-    has_var_keyword = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
-    positional_params = [
+    # If there are more positional args than the function's explicit positional parameters,
+    # drop the surplus from the front (they likely come from nested logging wrappers).
+    explicit_positional = [
         p
         for p in params
         if p.kind
         in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     ]
-    max_positional = len(positional_params)
-    cross_param_names = {"cross", "crossLayerProps", "cross_layer_props"}
-    matching_named = [p for p in params if p.name in cross_param_names]
-    if matching_named:
-        named = matching_named[0]
-        if (
-            named.kind is inspect.Parameter.KEYWORD_ONLY
-            or named.kind is inspect.Parameter.VAR_KEYWORD
-            or named.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
-        ):
-            return f(*args_no_cross, **{**kwargs, named.name: cross})
-        # positional-only: must pass positionally
-    if has_var_positional:
-        return f(*args_no_cross, cross, **kwargs)
-    if len(args_no_cross) + 1 <= max_positional:
-        return f(*args_no_cross, cross, **kwargs)
-    if has_var_keyword:
-        name = (
-            "crossLayerProps"
-            if "crossLayerProps" in {p.name for p in params}
-            else "cross"
-        )
-        return f(*args_no_cross, **{**kwargs, name: cross})
-    return f(*args_no_cross, **kwargs)
+    if not any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params):
+        surplus = len(args_no_cross) - len(explicit_positional)
+        if surplus > 0:
+            args_no_cross = args_no_cross[surplus:]
+    if cross is None:
+        return f(*args_no_cross)
+    # If the function accepts *args, do not append cross (we only pass to explicit slot)
+    if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params):
+        return f(*args_no_cross)
+    # If there is exactly one remaining explicit positional slot, treat it as cross and append
+    if len(args_no_cross) + 1 == len(explicit_positional):
+        return f(*args_no_cross, cross)
+    # Otherwise, do not pass cross
+    return f(*args_no_cross)
 
 
 def _make_passthrough_for_log(f):
     def _inner(log, *args, **kwargs):  # noqa: ARG001
-        return f(*args, **kwargs)
+        if kwargs:
+            raise ValueError("kwargs are not supported for layered functions")
+        return f(*args)
 
-    return _inner
+    return _create_wrapper_with_metadata(f, _inner)
 
 
 def _should_copy_direct_layer_key(key: str) -> bool:
@@ -105,11 +127,6 @@ def _wrap_domain_mapping_for_load(
             domain_data[property_name] = func
             continue
         wrapped_func = features._make_wrapped(func, logger_ids)
-        for attr in dir(func):
-            try:  # noqa: SIM105
-                setattr(wrapped_func, attr, getattr(func, attr))
-            except Exception:  # noqa: S110
-                pass
         domain_data[property_name] = wrapped_func
     return domain_data
 
@@ -154,13 +171,17 @@ class LayersFeatures:
 
     def _make_wrapped(self, f, logger_ids):
         def _inner2(*args, **kwargs):
-            args_no_cross, cross = extract_cross_layer_props(list(args))
-            effective_cross = cross or {"logging": {"ids": logger_ids}}
-            return _call_with_optional_cross(
-                f, args_no_cross, dict(kwargs), effective_cross
-            )
+            if len(kwargs.keys()) > 0:
+                raise ValueError("kwargs are not supported for layered functions")
 
-        return _inner2
+            args_no_cross, cross = extract_cross_layer_props(list(args))
+            # Combine upstream logger ids with provided cross (if any)
+            base = {"logging": {"ids": logger_ids}}
+            combined = combine_cross_layer_props(base, cross or {})  # type: ignore[arg-type]
+            # Only forward cross to the function if its signature allows it
+            return _call_with_optional_cross(f, args_no_cross, combined)
+
+        return _create_wrapper_with_metadata(f, _inner2)
 
     def _wrap_layer_functions(
         self,
@@ -183,18 +204,14 @@ class LayersFeatures:
             if _should_ignore_path(ignore_layer_functions, function_level_key):
                 wrapped = cross_wrapped
             else:
-                wrapped = layer_logger._log_wrap(
+                logged_func = layer_logger._log_wrap(
                     property_name, _make_passthrough_for_log(cross_wrapped)
                 )
-            for attr in dir(func):
-                try:  # noqa: SIM105
-                    setattr(wrapped, attr, getattr(func, attr))
-                except Exception:  # noqa: S110
-                    pass
+                wrapped = _create_wrapper_with_metadata(func, logged_func)
             out[property_name] = wrapped
         return out
 
-    async def _load_composite_layer(
+    def _load_composite_layer(
         self,
         app: Mapping[str, Any],
         composite_layers,
@@ -233,7 +250,7 @@ class LayersFeatures:
                 result = {**result, layer: {app.name: final_layer}}
         return result
 
-    async def _load_layer(
+    def _load_layer(
         self,
         app: Mapping[str, Any],
         current_layer: str,
@@ -269,7 +286,7 @@ class LayersFeatures:
         )
         return {current_layer: {app.name: final_layer}}
 
-    async def load_layers(self):
+    def load_layers(self):
         layers_in_order = self.context.config.in_layers_core.layer_order
         anti_layers = get_layers_unavailable(layers_in_order)
         core_layers_to_ignore = [
@@ -285,7 +302,7 @@ class LayersFeatures:
             previous_layer = {}
             for layer in layers_in_order:
                 if isinstance(layer, list):
-                    layer_instance = await self._load_composite_layer(
+                    layer_instance = self._load_composite_layer(
                         app,
                         layer,
                         {k: v for k, v in existing_layers.items() if k != "log"},
@@ -293,7 +310,7 @@ class LayersFeatures:
                         anti_layers,
                     )
                 else:
-                    layer_instance = await self._load_layer(
+                    layer_instance = self._load_layer(
                         app,
                         layer,
                         {k: v for k, v in existing_layers.items() if k != "log"},

@@ -14,7 +14,7 @@ class GlobalsFeatures:
     def __init__(self, context: FeaturesContext):
         self.context = context
 
-    async def load_globals(self, environment_or_config: Any) -> CommonContext:
+    def load_globals(self, environment_or_config: Any) -> CommonContext:
         services = self.context.services[globals_name]
         if not services:
             raise RuntimeError(f"Services for {globals_name} not found")

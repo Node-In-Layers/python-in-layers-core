@@ -9,7 +9,7 @@ from typing import (
     TypeVar,
 )
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 from pydantic.dataclasses import dataclass
 from pydantic_core import core_schema
 
@@ -123,14 +123,26 @@ class LogMethod(Protocol):
 # ======================================================================
 
 
-class CrossLayerLogging(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    ids: list[LogId]
+class CrossLayerLogging(Protocol):
+    """
+    Properties useful for logging and tracing across layers.
+    """
+
+    # model_config = ConfigDict(extra="allow")
+    ids: list[LogId] = Field(
+        ..., description="List of log ids to be used for tracing across layers."
+    )
 
 
-class CrossLayerProps(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    logging: CrossLayerLogging | None
+class CrossLayerProps(Protocol):
+    """
+    Properties that are useful across layers. Useful for passing along logging and tracing information across layers.
+    """
+
+    # model_config = ConfigDict(extra="allow")
+    logging: CrossLayerLogging | None = Field(
+        ..., description="Properties useful for logging and tracing across layers."
+    )
 
 
 # ======================================================================

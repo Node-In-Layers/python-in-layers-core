@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 from box import Box
 
@@ -51,11 +50,8 @@ def _config():
 
 
 def test_load_system_end_to_end():
-    async def run():
-        sys = await load_system(SystemProps(environment="test", config=_config()))
-        ping = sys.services.demo.ping("x")[0]
-        call_ping = sys.features.demo.callPing("y")[0]
-        assert ping[0:5] == "pong:"
-        assert call_ping[0:6] == "pong:y"
-
-    asyncio.run(run())
+    sys = load_system(SystemProps(environment="test", config=_config()))
+    ping = sys.services.demo.ping("x")[0]
+    call_ping = sys.features.demo.callPing("y")[0]
+    assert ping[0:5] == "pong:"
+    assert call_ping[0:6] == "pong:y"

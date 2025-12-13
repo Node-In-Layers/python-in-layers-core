@@ -21,7 +21,7 @@ class SystemProps:
     config: Config | None = None
 
 
-async def load_system(props: SystemProps) -> Any:
+def load_system(props: SystemProps) -> Any:
     global_services = globals_services.create(
         GlobalsServicesProps(
             environment=props.environment,
@@ -38,9 +38,7 @@ async def load_system(props: SystemProps) -> Any:
             ),
         ),
     )
-    globals_context = await global_features.load_globals(
-        props.config or props.environment
-    )
+    globals_context = global_features.load_globals(props.config or props.environment)
 
     # layers
 
@@ -58,7 +56,7 @@ async def load_system(props: SystemProps) -> Any:
             ),
         )
     )
-    layers_loaded = await the_layers_features.load_layers()
+    layers_loaded = the_layers_features.load_layers()
     try:
         if "services" in layers_loaded and layers_name in layers_loaded.services:
             del layers_loaded.services[layers_name]

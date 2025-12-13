@@ -57,7 +57,7 @@ class GlobalsServices:
             "environment": self.props.environment,
         }
 
-    async def get_globals(self, common_globals: CommonContext, app: Mapping[str, Any]):
+    def get_globals(self, common_globals: CommonContext, app: Mapping[str, Any]):
         if "globals" in app:
             return app.globals.create(common_globals)
         return {}

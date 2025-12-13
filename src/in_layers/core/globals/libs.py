@@ -4,7 +4,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-from ..libs import combine_cross_layer_props
+from ..libs import combine_cross_layer_props, is_cross_layer_props
 from ..protocols import CrossLayerProps, Logger, LogLevelNames
 
 
@@ -23,10 +23,6 @@ def combine_logging_props(
     base: CrossLayerProps = {"logging": {"ids": logger.get_ids()}}
     final = combine_cross_layer_props(base, cross_layer_props or {})  # type: ignore[arg-type]
     return final["logging"]
-
-
-def is_cross_layer_logging_props(maybe: CrossLayerProps | None) -> bool:
-    return bool(maybe and isinstance(maybe, Mapping) and "logging" in maybe and isinstance(maybe.get("logging"), Mapping) and isinstance(maybe["logging"].get("ids"), list))  # type: ignore[index]
 
 
 def cap_for_logging(input: Any, max_size: int = 50000) -> Any:
@@ -72,6 +68,6 @@ def extract_cross_layer_props(
     if not args:
         return [], None
     last = args[-1]
-    if is_cross_layer_logging_props(last):  # type: ignore[arg-type]
+    if is_cross_layer_props(last):  # type: ignore[arg-type]
         return args[:-1], last  # type: ignore[return-value]
     return args, None

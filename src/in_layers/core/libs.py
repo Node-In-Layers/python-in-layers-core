@@ -4,6 +4,8 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from box import Box
+
 from .protocols import (
     CoreNamespace,
     CrossLayerProps,
@@ -147,7 +149,9 @@ def combine_cross_layer_props(
     final_ids = a_ids + unique
     logging_other = dict(a.get("logging", {}))
     logging_other.pop("ids", None)
-    result: CrossLayerProps = {"logging": {"ids": final_ids, **logging_other}}
+    result: CrossLayerProps = Box(
+        {"logging": {"ids": final_ids, **logging_other}}, default_box=True
+    )
     return result
 
 
@@ -210,6 +214,33 @@ def get_namespace(package_name: str, app: str | None = None) -> str:
     if app:
         return f"{package_name}/{app}"
     return package_name
+
+
+def is_cross_layer_props(value: Any) -> bool:
+    """
+    Shape-based check for cross layer props.
+    Accepts either:
+      - An object with attribute 'logging' that is a Mapping with 'ids' as a list
+      - A Mapping with key 'logging' that is a Mapping with 'ids' as a list
+    """
+    if value is None:
+        return False
+    # Handle Mapping shape first
+    if isinstance(value, Mapping):
+        logging_val = value.get("logging")
+        return isinstance(logging_val, Mapping) and isinstance(
+            logging_val.get("ids"), list
+        )
+    # Handle objects (e.g., pydantic models) exposing attribute 'logging'
+    try:
+        logging_attr = getattr(value, "logging", None)
+        if isinstance(logging_attr, Mapping) and isinstance(
+            logging_attr.get("ids"), list
+        ):
+            return True
+    except Exception:
+        return False
+    return False
 
 
 def do_nothing_fetcher(model: Any, primary_key: Any) -> Any:  # noqa: ARG001
