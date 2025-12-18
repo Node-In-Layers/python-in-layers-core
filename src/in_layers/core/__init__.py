@@ -23,6 +23,25 @@ from .libs import (  # noqa: F401
 from .models.libs import (  # noqa: F401
     model,
 )
+from .models.protocols import (  # noqa: F401
+    BackendProtocol,
+    DatastoreValueType,
+    DatesAfterQuery,
+    DatesBeforeQuery,
+    EqualitySymbol,
+    InLayersModel,
+    InLayersModelInstance,
+    ModelDefinition,
+    ModelSearch,
+    ModelSearchResult,
+    ModelServices,
+    PropertyOptions,
+    PropertyQuery,
+    Query,
+    QueryTokens,
+    SortOrder,
+    SortStatement,
+)
 from .models.query import (  # noqa: F401
     query_builder,
 )
