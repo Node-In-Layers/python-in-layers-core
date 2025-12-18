@@ -17,7 +17,14 @@ from .libs import (  # noqa: F401
     get_log_level_name,
     get_log_level_number,
     is_config,
+    is_error_object,
     validate_config,
+)
+from .models.libs import (  # noqa: F401
+    model,
+)
+from .models.query import (  # noqa: F401
+    query_builder,
 )
 from .protocols import (  # noqa: F401
     AppLayer,

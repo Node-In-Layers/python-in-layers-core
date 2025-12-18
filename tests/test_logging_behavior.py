@@ -85,8 +85,8 @@ def test_wrapper_logs_use_custom_wrap_level():
     )
     root: RootLogger = composite_logger([method])
     layer = root.get_logger(ctx).get_app_logger("demo").get_layer_logger("features")
-    fn = layer._log_wrap("wrapped", lambda log, x, cross=None: x)  # type: ignore[call-arg]
-    fn("X")
+    fn = layer._log_wrap("wrapped", lambda log, x, cross_layer_props=None: x)  # type: ignore[call-arg]
+    fn("X", cross_layer_props=None)
     assert any(
         "Executing features function" in m or "Executed features function" in m
         for m in collected

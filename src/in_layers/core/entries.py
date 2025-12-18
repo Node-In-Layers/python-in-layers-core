@@ -12,7 +12,8 @@ from .globals import services as globals_services
 from .layers import features as layers_features
 from .layers import name as layers_name
 from .layers import services as layers_services
-from .protocols import Config, FeaturesContext, GlobalsServicesProps
+from .models import services as core_model_services
+from .protocols import Config, CoreNamespace, FeaturesContext, GlobalsServicesProps
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,9 @@ def load_system(props: SystemProps) -> Any:
                 {
                     "services": {
                         layers_name: the_layers_services,
+                        CoreNamespace.models.value: core_model_services.create(
+                            cast(Box, globals_context)
+                        ),
                     },
                 }
             ),

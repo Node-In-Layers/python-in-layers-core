@@ -38,3 +38,19 @@ class AttrMap:
         if isinstance(value, dict):
             return AttrMap(value)
         return value
+
+
+def rgetattr(obj, attr: str, default=None):
+    """
+    Like getattr, but supports 'a.b.c' and returns `default`
+    if any part is missing (instead of raising).
+    """
+    for name in attr.split("."):
+        # Support both objects and dict-like containers
+        if isinstance(obj, dict):
+            obj = obj.get(name, default)
+        else:
+            obj = getattr(obj, name, default)
+        if obj is default:  # stop if missing
+            break
+    return obj

@@ -58,6 +58,15 @@ class CommonLayerName(str, Enum):
     entries = "entries"
 
 
+class ModelsConfig(Protocol):
+    #: Optional: The namespace to the domain.services that has a "get_model_props()" function used for loading models
+    model_backend: str | None
+    #: Optional: When true, wrappers are built around models to bubble up CRUDS interfaces for models through services.
+    model_services_cruds: bool | None
+    #: Optional: When true, wrappers are built around models to bubble up CRUDS interfaces for models through features.
+    model_features_cruds: bool | None
+
+
 # ======================================================================
 # Generic helpers / aliases
 # ======================================================================
@@ -299,11 +308,15 @@ LayerDescription = str | list[str]
 
 
 class CoreConfig(Protocol):
+    models: ModelsConfig
     logging: CoreLoggingConfig
     layer_order: list[LayerDescription]
     domains: list[Domain]
-    model_factory: str | None
+    # Name of the domain whose services provide model backend resolution
+    model_backend: str | None
     model_cruds: bool
+    # Back-compat fields (deprecated):
+    model_factory: str | None
     custom_model_factory: Mapping[str, Any] | None
 
 
