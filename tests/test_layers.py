@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from box import Box
 from in_layers.core import CrossLayerProps
 from in_layers.core.layers.features import create as create_features
+from in_layers.core.layers.features import _call_with_optional_cross
 from in_layers.core.entries import load_system, SystemProps
 from in_layers.core.models.libs import model
 from in_layers.core.models.query import query_builder
@@ -433,3 +434,178 @@ def test_layers_puts_cruds_in_features():
     except Exception as e:
         print(e)
         assert False
+
+
+# Tests for _call_with_optional_cross
+
+
+def test_call_with_optional_cross_none_cross_props():
+    """When cross_layer_props is None, should just pass through without injection."""
+
+    def func(a, b):
+        return (a, b)
+
+    result = _call_with_optional_cross(func, [1, 2], {}, None)
+    assert result == (1, 2)
+
+
+def test_call_with_optional_cross_with_cross_kw_param():
+    """When function has cross_layer_props keyword param, should inject via keyword."""
+
+    def func(a, b, cross_layer_props=None):
+        return (a, b, cross_layer_props)
+
+    cross_props = Box(logging=Box(ids=[]))
+    result = _call_with_optional_cross(func, [1, 2], {}, cross_props)
+    assert result == (1, 2, cross_props)
+
+
+def test_call_with_optional_cross_with_cross_kw_param_already_in_kwargs():
+    """When cross_layer_props is already in kwargs, should not overwrite."""
+
+    def func(a, b, cross_layer_props=None):
+        return (a, b, cross_layer_props)
+
+    existing_cross = Box(existing=True)
+    cross_props = Box(logging=Box(ids=[]))
+    result = _call_with_optional_cross(
+        func, [1, 2], {"cross_layer_props": existing_cross}, cross_props
+    )
+    assert result == (1, 2, existing_cross)
+
+
+def test_call_with_optional_cross_with_var_positional():
+    """When function has *args, should not inject positionally."""
+
+    def func(a, *args):
+        return (a, args)
+
+    cross_props = Box(logging=Box(ids=[]))
+    result = _call_with_optional_cross(func, [1], {}, cross_props)
+    # Should not inject cross_props, just pass through
+    assert result == (1, ())
+
+
+def test_call_with_optional_cross_positional_injection_when_room():
+    """When there's room for positional injection, should inject."""
+
+    def func(a, b):
+        return (a, b)
+
+    cross_props = Box(logging=Box(ids=[]))
+    result = _call_with_optional_cross(func, [1], {}, cross_props)
+    # Should inject cross_props as second positional arg
+    assert result == (1, cross_props)
+
+
+def test_call_with_optional_cross_positional_injection_conflict():
+    """When next positional param is already in kwargs, should skip injection."""
+
+    # Simulate the bug scenario: function with 2 params, args_no_cross has 1, next param in kwargs
+    def func(a, request):
+        return (a, request)
+
+    cross_props = Box(logging=Box(ids=[]))
+    request_obj = Box(data="test")
+    # args_no_cross has 'a', next param 'request' is in kwargs
+    # len(args_no_cross) + 1 = 2, len(explicit) = 2, so we'd try to inject
+    # But 'request' is in kwargs, so we should skip injection
+    result = _call_with_optional_cross(
+        func, ["a_value"], {"request": request_obj}, cross_props
+    )
+    # Should not inject cross_props positionally to avoid conflict with 'request' in kwargs
+    assert result == ("a_value", request_obj)
+
+
+def test_call_with_optional_cross_positional_injection_no_room():
+    """When there's no room for positional injection, should not inject."""
+
+    def func(a, b, c):
+        return (a, b, c)
+
+    cross_props = Box(logging=Box(ids=[]))
+    result = _call_with_optional_cross(func, [1, 2, 3], {}, cross_props)
+    # Should not inject, all positions filled
+    assert result == (1, 2, 3)
+
+
+def test_call_with_optional_cross_method_with_request_in_kwargs():
+    """Test the specific bug scenario: method with request in kwargs."""
+
+    class TestClass:
+        def xyz(self, request):
+            return (self, request)
+
+    obj = TestClass()
+    cross_props = Box(logging=Box(ids=[]))
+    request_obj = Box(data="test")
+    # args_no_cross is empty (self is bound), request is in kwargs
+    result = _call_with_optional_cross(
+        obj.xyz, [], {"request": request_obj}, cross_props
+    )
+    # Should not inject cross_props to avoid "multiple values for argument 'request'"
+    assert result == (obj, request_obj)
+
+
+def test_call_with_optional_cross_with_partial_args():
+    """When some args are provided positionally and next param in kwargs."""
+
+    def func(a, b, c):
+        return (a, b, c)
+
+    cross_props = Box(logging=Box(ids=[]))
+    # a is positional, b is in kwargs, c would be next for cross_props
+    result = _call_with_optional_cross(func, [1], {"b": 2, "c": 3}, cross_props)
+    # Should not inject cross_props since c is already in kwargs
+    assert result == (1, 2, 3)
+
+
+def test_call_with_optional_cross_with_cross_kw_variants():
+    """Test different cross param name variants."""
+
+    def func1(a, crossLayer=None):
+        return (a, crossLayer)
+
+    def func2(a, cross_layer=None):
+        return (a, cross_layer)
+
+    def func3(a, crossLayerProps=None):
+        return (a, crossLayerProps)
+
+    cross_props = Box(logging=Box(ids=[]))
+
+    result1 = _call_with_optional_cross(func1, [1], {}, cross_props)
+    assert result1 == (1, cross_props)
+
+    result2 = _call_with_optional_cross(func2, [1], {}, cross_props)
+    assert result2 == (1, cross_props)
+
+    result3 = _call_with_optional_cross(func3, [1], {}, cross_props)
+    assert result3 == (1, cross_props)
+
+
+def test_call_with_optional_cross_with_keyword_only_params():
+    """When function has keyword-only params, should handle correctly."""
+
+    def func(a, *, b):
+        return (a, b)
+
+    cross_props = Box(logging=Box(ids=[]))
+    result = _call_with_optional_cross(func, [1], {"b": 2}, cross_props)
+    # Should not inject positionally (no room), just pass through
+    assert result == (1, 2)
+
+
+def test_call_with_optional_cross_trim_surplus_args():
+    """Test that surplus args are trimmed correctly."""
+
+    def func(a):
+        return a
+
+    cross_props = Box(logging=Box(ids=[]))
+    # Provide more args than function accepts
+    # _trim_surplus_args_for_params trims from the beginning, keeping the last N args
+    # So [1, 2, 3] with 1 param becomes [3]
+    result = _call_with_optional_cross(func, [1, 2, 3], {}, cross_props)
+    # Should trim to just what's needed (keeps the last arg)
+    assert result == 3

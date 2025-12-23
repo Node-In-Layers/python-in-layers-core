@@ -47,6 +47,9 @@ class _InLayersModelInstanceImpl(InLayersModelInstance):
     def to_dict(self) -> Box:
         return Box(self.__data)
 
+    def to_pydantic(self) -> BaseModel:
+        return self.__model.to_pydantic(self.__data)
+
     def validate(self) -> None:
         self.__model.validate(self.__data)
 
@@ -136,6 +139,12 @@ class _InLayersModelImpl(InLayersModel):
         )
         return final_container
 
+    def bulk_insert(self, data: list[Mapping]) -> None:
+        self.__backend.bulk_insert(self, data)
+
+    def bulk_delete(self, ids: list[PrimaryKeyType]) -> None:
+        self.__backend.bulk_delete(self, ids)
+
     def get_primary_key_name(self) -> str:
         meta = get_model_definition(self.__model)
         return meta.primary_key
@@ -143,6 +152,9 @@ class _InLayersModelImpl(InLayersModel):
     def get_primary_key(self, model_data: Mapping) -> PrimaryKeyType:
         pk_name = self.get_primary_key_name()
         return model_data[pk_name]
+
+    def to_pydantic(self, data: Mapping) -> BaseModel:
+        return self.__model(**data)
 
 
 def create_in_layers_model(

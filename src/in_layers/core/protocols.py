@@ -132,25 +132,29 @@ class LogMethod(Protocol):
 # ======================================================================
 
 
-class CrossLayerLogging(Protocol):
+@dataclass(frozen=True)
+class CrossLayerLogging:
     """
     Properties useful for logging and tracing across layers.
     """
 
     # model_config = ConfigDict(extra="allow")
     ids: list[LogId] = Field(
-        ..., description="List of log ids to be used for tracing across layers."
+        default_factory=list,
+        description="List of log ids to be used for tracing across layers.",
     )
 
 
-class CrossLayerProps(Protocol):
+@dataclass(frozen=True)
+class CrossLayerProps:
     """
     Properties that are useful across layers. Useful for passing along logging and tracing information across layers.
     """
 
     # model_config = ConfigDict(extra="allow")
     logging: CrossLayerLogging | None = Field(
-        ..., description="Properties useful for logging and tracing across layers."
+        default=None,
+        description="Properties useful for logging and tracing across layers.",
     )
 
 

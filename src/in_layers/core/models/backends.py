@@ -49,12 +49,6 @@ class MemoryBackend(BackendProtocol):
             self.__sequences[key] = 0
         return self.__buckets[key]
 
-    def connect(self) -> None:
-        return None
-
-    def disconnect(self) -> None:
-        return None
-
     def create(self, model, data):  # type: ignore[override]
         bucket = self.__get_bucket(model)
         payload = dict(data)
@@ -104,6 +98,14 @@ class MemoryBackend(BackendProtocol):
         sorted_records = _apply_sort(filtered, query.sort)
         limited = _apply_take(sorted_records, query.take)
         return Box(instances=[dict(x) for x in limited], page=query.page)
+
+    def bulk_insert(self, model, data):
+        for item in data:
+            self.create(model, item)
+
+    def bulk_delete(self, model, ids):
+        for id in ids:
+            self.delete(model, id)
 
     def dispose(self) -> None:
         self.__buckets.clear()

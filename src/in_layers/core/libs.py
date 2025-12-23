@@ -169,31 +169,36 @@ def _convert_error_to_cause(error: Exception, code: str, message: str) -> ErrorO
 def create_error_object(
     code: str, message: str, error: Any | None = None
 ) -> ErrorObject:
-    base: ErrorObject = {"error": {"code": code, "message": message}}
+    base = ErrorObject(error=ErrorDetails(code=code, message=message))
     if error is None:
         return base
     if isinstance(error, Exception):
-        details: ErrorObject = {
-            "error": {
-                "details": str(error),
-                "message": message,
-                "code": code,
-            }
-        }
         cause = getattr(error, "__cause__", None)
         if isinstance(cause, Exception):
             cause_obj = _convert_error_to_cause(cause, "CauseError", str(cause))
-            details["error"]["cause"] = cause_obj["error"]
-        return _merge(base, details)
+            cause = cause_obj["error"]
+        return ErrorObject(
+            error=ErrorDetails(
+                code=code, message=message, details=str(error), cause=cause
+            )
+        )
     if isinstance(error, str):
-        return _merge(base, {"error": {"details": error}})
+        return ErrorObject(
+            error=ErrorDetails(code=code, message=message, details=error)
+        )
     if isinstance(error, Mapping):
         try:
             json.dumps(error)
-            return _merge(base, {"error": {"data": dict(error)}})
+            return ErrorObject(
+                error=ErrorDetails(code=code, message=message, data=dict(error))
+            )
         except Exception:
-            return _merge(base, {"error": {"details": str(error)}})
-    return _merge(base, {"error": {"details": str(error)}})
+            return ErrorObject(
+                error=ErrorDetails(code=code, message=message, details=str(error))
+            )
+    return ErrorObject(
+        error=ErrorDetails(code=code, message=message, details=str(error))
+    )
 
 
 def is_error_object(value: Any) -> bool:

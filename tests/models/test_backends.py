@@ -600,8 +600,7 @@ def test_compare_ne_via_number_query():
 
 def test_connect_disconnect_noop():
     be, _ = _mk_backend_and_model()
-    be.connect()
-    be.disconnect()
+    be.dispose()
     assert True
 
 

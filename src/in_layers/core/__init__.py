@@ -35,6 +35,7 @@ from .models.protocols import (  # noqa: F401
     ModelSearch,
     ModelSearchResult,
     ModelServices,
+    PrimaryKeyType,
     PropertyOptions,
     PropertyQuery,
     Query,

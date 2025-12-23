@@ -38,15 +38,15 @@ class _CrudsWrapper:
 
     def create(self, data=None, **kwargs):
         inst = self._im.create(data, **kwargs)
-        return Box(inst.to_dict())
+        return inst.to_pydantic()
 
     def retrieve(self, id):
         inst = self._im.retrieve(id)
-        return None if inst is None else Box(inst.to_dict())
+        return None if inst is None else inst.to_pydantic()
 
     def update(self, id, **kwargs):
         inst = self._im.update(id, **kwargs)
-        return Box(inst.to_dict())
+        return inst.to_pydantic()
 
     def delete(self, id):
         self._im.delete(id)
@@ -54,7 +54,7 @@ class _CrudsWrapper:
     def search(self, query):
         res = self._im.search(query)
         try:
-            instances = [Box(i.to_dict()) for i in res.instances]
+            instances = [i.to_pydantic() for i in res.instances]
             page = getattr(res, "page", None)
             return Box(instances=instances, page=page)
         except Exception:
@@ -349,6 +349,14 @@ def _call_with_optional_cross(
 
     explicit = _get_explicit_positional_params(params)
     if len(args_no_cross) + 1 == len(explicit):
+        # Check if the parameter that would receive cross_layer_props is already in kwargs
+        # to avoid "multiple values for argument" error
+        next_param_index = len(args_no_cross)
+        if next_param_index < len(explicit):
+            next_param_name = explicit[next_param_index].name
+            if next_param_name in kwargs_no_cross:
+                # Can't inject positionally - would conflict with keyword arg
+                return f(*args_no_cross, **kwargs_no_cross)
         return f(*args_no_cross, cross_layer_props, **kwargs_no_cross)
     return f(*args_no_cross, **kwargs_no_cross)
 
