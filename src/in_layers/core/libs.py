@@ -155,15 +155,15 @@ def combine_cross_layer_props(
     return result
 
 
-def _convert_error_to_cause(error: Exception, code: str, message: str) -> ErrorObject:
+def _convert_error_to_cause(error: Exception, code: str, message: str) -> ErrorDetails:
     err: ErrorDetails = {"code": code, "message": message or str(error)}
     if getattr(error, "message", None):
         err["details"] = str(error)
     cause = getattr(error, "__cause__", None)
     if isinstance(cause, Exception):
         cause_obj = _convert_error_to_cause(cause, "NestedError", str(cause))
-        err["cause"] = cause_obj["error"]
-    return {"error": err}
+        err["cause"] = cause_obj
+    return err
 
 
 def create_error_object(
@@ -175,8 +175,7 @@ def create_error_object(
     if isinstance(error, Exception):
         cause = getattr(error, "__cause__", None)
         if isinstance(cause, Exception):
-            cause_obj = _convert_error_to_cause(cause, "CauseError", str(cause))
-            cause = cause_obj["error"]
+            cause = _convert_error_to_cause(cause, "CauseError", str(cause))
         return ErrorObject(
             error=ErrorDetails(
                 code=code, message=message, details=str(error), cause=cause

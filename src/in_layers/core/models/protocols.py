@@ -61,6 +61,10 @@ class PropertyOptions:
     equality_symbol: EqualitySymbol | None = None
 
 
+class ToPydanticOptions(Protocol):
+    no_validation: bool | None
+
+
 @dataclass(frozen=True)
 class PropertyQuery:
     type: Literal["property"]
@@ -173,7 +177,7 @@ class InLayersModelInstance(Protocol):
     def to_dict(self) -> Box: ...
 
     #: Converts the instance data to a Pydantic model
-    def to_pydantic(self) -> BaseModel: ...
+    def to_pydantic(self, options: ToPydanticOptions | None = None) -> BaseModel: ...
 
     #: Validates the instance data against the model schema
     def validate(self) -> None: ...
@@ -232,7 +236,9 @@ class InLayersModel(Protocol):
     def get_primary_key(self, model_data: Mapping) -> PrimaryKeyType: ...
 
     #: Converts the model data to a Pydantic model
-    def to_pydantic(self, data: Mapping) -> BaseModel: ...
+    def to_pydantic(
+        self, data: Mapping, options: ToPydanticOptions | None = None
+    ) -> BaseModel: ...
 
 
 class BackendProtocol(Protocol):

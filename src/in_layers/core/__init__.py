@@ -20,9 +20,7 @@ from .libs import (  # noqa: F401
     is_error_object,
     validate_config,
 )
-from .models.libs import (  # noqa: F401
-    model,
-)
+from .models.libs import get_model_definition, model  # noqa: F401
 from .models.protocols import (  # noqa: F401
     BackendProtocol,
     DatastoreValueType,

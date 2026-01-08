@@ -13,6 +13,7 @@ from .protocols import (
     ModelDefinition,
     ModelSearchResult,
     PrimaryKeyType,
+    ToPydanticOptions,
 )
 
 
@@ -47,8 +48,8 @@ class _InLayersModelInstanceImpl(InLayersModelInstance):
     def to_dict(self) -> Box:
         return Box(self.__data)
 
-    def to_pydantic(self) -> BaseModel:
-        return self.__model.to_pydantic(self.__data)
+    def to_pydantic(self, options: ToPydanticOptions | None = None) -> BaseModel:
+        return self.__model.to_pydantic(self.__data, options)
 
     def validate(self) -> None:
         self.__model.validate(self.__data)
@@ -153,7 +154,12 @@ class _InLayersModelImpl(InLayersModel):
         pk_name = self.get_primary_key_name()
         return model_data[pk_name]
 
-    def to_pydantic(self, data: Mapping) -> BaseModel:
+    def to_pydantic(
+        self, data: Mapping, options: ToPydanticOptions | None = None
+    ) -> BaseModel:
+        if options and options.no_validation:
+            # Use model_construct to skip validation
+            return self.__model.model_construct(**data)
         return self.__model(**data)
 
 

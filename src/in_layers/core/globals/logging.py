@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from typing import Any
 
 import httpx
+from pydantic import RootModel
 
 from ..libs import (
     combine_cross_layer_props,
@@ -19,6 +23,7 @@ from ..protocols import (
     CommonContext,
     CommonLayerName,
     CrossLayerProps,
+    ErrorObject,
     HighLevelLogger,
     LayerLogger,
     LogFormat,
@@ -39,6 +44,92 @@ from .libs import (
 
 MAX_LOGGING_ATTEMPTS = 5
 DEFAULT_MAX_LOG_SIZE_IN_CHARACTERS = 50000
+
+
+def _to_jsonable(
+    obj: Any,
+    *,
+    max_depth: int = 6,
+    _depth: int = 0,
+    _seen: set[int] | None = None,
+) -> Any:
+    """
+    Convert arbitrary objects into JSON-serializable structures.
+
+    This is intentionally lossy: anything unknown becomes a string.
+    """
+    if _seen is None:
+        _seen = set()
+    if _depth > max_depth:
+        return "[MaxDepth]"
+
+    # Fast-path JSON primitives
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+
+    # Avoid cycles
+    oid = id(obj)
+    if oid in _seen:
+        return "[Circular]"
+    _seen.add(oid)
+
+    try:
+        # Common "value" carriers
+        if isinstance(obj, Enum):
+            return _to_jsonable(obj.value, max_depth=max_depth, _depth=_depth + 1, _seen=_seen)
+
+        # Datetimes (often present in domain data / results)
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+
+        # Bytes
+        if isinstance(obj, (bytes, bytearray, memoryview)):
+            b = bytes(obj)
+            try:
+                return b.decode("utf-8")
+            except Exception:
+                return {"$bytes_b64": base64.b64encode(b).decode("ascii")}
+
+        # Pydantic models (v2) or compatible objects
+        if hasattr(obj, "model_dump") and callable(getattr(obj, "model_dump")):
+            try:
+                dumped = obj.model_dump(mode="json")  # type: ignore[call-arg]
+            except Exception:
+                dumped = obj.model_dump()  # type: ignore[call-arg]
+            return _to_jsonable(dumped, max_depth=max_depth, _depth=_depth + 1, _seen=_seen)
+
+        # Dataclasses
+        if is_dataclass(obj):
+            return _to_jsonable(asdict(obj), max_depth=max_depth, _depth=_depth + 1, _seen=_seen)
+
+        # Exceptions
+        if isinstance(obj, BaseException):
+            return {
+                "type": type(obj).__name__,
+                "message": str(obj),
+                "args": _to_jsonable(list(getattr(obj, "args", ()) or ()), max_depth=max_depth, _depth=_depth + 1, _seen=_seen),
+            }
+
+        # Mappings / sequences
+        if isinstance(obj, Mapping):
+            out: dict[str, Any] = {}
+            for k, v in obj.items():
+                out[str(k)] = _to_jsonable(
+                    v, max_depth=max_depth, _depth=_depth + 1, _seen=_seen
+                )
+            return out
+
+        if isinstance(obj, (list, tuple, set, frozenset)):
+            return [
+                _to_jsonable(x, max_depth=max_depth, _depth=_depth + 1, _seen=_seen)
+                for x in list(obj)
+            ]
+
+        # As a last resort, prefer stringifying (stable + safe)
+        return str(obj)
+    finally:
+        # allow the same object to appear elsewhere without being treated as a cycle
+        _seen.discard(oid)
 
 
 def _setup_python_logging(level: int) -> None:
@@ -267,27 +358,49 @@ class _Logger(Logger):  # type: ignore[misc]
     def _do_log(self, message_level: LogLevelNames):
         def _f(
             message: str,
-            data_or_error: Mapping[str, Any] | None = None,
+            data_or_error: Mapping[str, Any] | ErrorObject | None = None,
             *,
             ignore_size_limit: bool = False,
         ) -> Any:
             if _should_ignore(self.config_level, message_level):
                 return None
-            is_error = isinstance(data_or_error, Mapping) and "error" in (
+            is_error_obj = isinstance(data_or_error, ErrorObject)
+            is_error_like = isinstance(data_or_error, Mapping) and "error" in (
                 data_or_error or {}
             )
-            data = {} if is_error else dict(data_or_error or {})
+            data = {}
+            if is_error_obj:
+                data = RootModel(data_or_error).model_dump()
+            elif is_error_like:
+                data = dict(data_or_error or {})
+            else:
+                data = dict(data_or_error or {})
+            # Ensure that logged payloads are JSON-serializable so consumers
+            # (e.g. tcp logger / external pipelines) don't need to normalize.
+            jsonable_data = _to_jsonable(data)
+            error_jsonable = (
+                jsonable_data.get("error")
+                if isinstance(jsonable_data, Mapping) and (is_error_like or is_error_obj)
+                else None
+            )
             the_data = (
-                data
+                jsonable_data
                 if ignore_size_limit
                 else cap_for_logging(
-                    data,
+                    jsonable_data,
                     self.context.config.in_layers_core.logging.get(
                         "max_log_size_in_characters", DEFAULT_MAX_LOG_SIZE_IN_CHARACTERS
                     )
                     or 50000,
                 )
             )
+            if (is_error_like or is_error_obj) and error_jsonable is not None:
+                # Preserve `error` even if truncation dropped it.
+                try:
+                    the_data = dict(the_data or {})
+                    the_data["error"] = error_jsonable
+                except Exception:
+                    the_data = {"error": error_jsonable}
             log_message: LogMessage = {
                 "id": str(uuid.uuid4()),
                 "environment": self.context.constants["environment"],
@@ -296,7 +409,6 @@ class _Logger(Logger):  # type: ignore[misc]
                 "message": message,
                 "ids": self.props.get("ids"),
                 "logger": ":".join(self.props.get("names", [])),
-                **({"error": data_or_error["error"]} if is_error else {}),
                 **the_data,
             }  # type: ignore[typeddict-item]
             [bm(log_message) for bm in self.bound_methods]

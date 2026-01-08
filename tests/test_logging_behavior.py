@@ -7,6 +7,7 @@ from box import Box
 
 from in_layers.core.globals.logging import composite_logger, standard_logger
 from in_layers.core.protocols import CoreNamespace, LogLevelNames, RootLogger
+import json
 
 
 def _ctx(logging_cfg: Mapping[str, Any]) -> Box:
@@ -91,6 +92,58 @@ def test_wrapper_logs_use_custom_wrap_level():
         "Executing features function" in m or "Executed features function" in m
         for m in collected
     )
+
+
+def test_wrapped_function_result_is_jsonable_in_log_payload():
+    collected: list[dict[str, Any]] = []
+
+    def method(_c):
+        def log_fn(msg):
+            collected.append(msg)  # type: ignore[arg-type]
+
+        return log_fn
+
+    ctx = _ctx(
+        {
+            "log_level": LogLevelNames.info,
+            "log_format": "simple",
+            "get_function_wrap_log_level": lambda _layer, _fn: LogLevelNames.info,
+        }
+    )
+    root: RootLogger = composite_logger([method])
+    layer = root.get_logger(ctx).get_app_logger("demo").get_layer_logger("features")
+
+    class NotJson:
+        def __str__(self) -> str:
+            return "NotJson()"
+
+    fn = layer._log_wrap("wrapped", lambda _log, cross_layer_props=None: NotJson())  # type: ignore[call-arg]
+    fn(cross_layer_props=None)
+    executed = [m for m in collected if m.get("message") == "Executed features function"]
+    assert executed and "result" in executed[-1]
+    # `result` should be JSON-serializable without default=str
+    json.dumps(executed[-1]["result"])
+
+
+def test_error_payload_is_jsonable():
+    collected: list[dict[str, Any]] = []
+
+    def method(_c):
+        def log_fn(msg):
+            collected.append(msg)  # type: ignore[arg-type]
+
+        return log_fn
+
+    root: RootLogger = composite_logger([method])
+    flog = (
+        root.get_logger(_ctx({"log_level": LogLevelNames.info, "log_format": "simple"}))
+        .get_app_logger("demo")
+        .get_layer_logger("features")
+        .get_function_logger("fn")
+    )
+    flog.error("E", {"error": Exception("boom")})
+    assert collected and "error" in collected[-1]
+    json.dumps(collected[-1]["error"])
 
 
 def test_standard_logger_json_format_emits(caplog):

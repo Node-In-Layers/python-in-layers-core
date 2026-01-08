@@ -87,14 +87,14 @@ class ErrorDetails:
     code: str = Field(..., description="A unique string code for the error")
     message: str = Field(..., description="A user friendly error message.")
     details: str | None = Field(
-        None, description="Additional details in a string format."
+        default=None, description="Additional details in a string format."
     )
     data: Mapping[str, JsonAble] | None = Field(
-        None, description="Additional data as an object."
+        default=None, description="Additional data as an object."
     )
-    trace: str | None = Field(None, description="A trace of the error.")
-    cause: ErrorObject | None = Field(
-        None, description="A suberror that has the cause of the error."
+    trace: str | None = Field(default=None, description="A trace of the error.")
+    cause: ErrorDetails | None = Field(
+        default=None, description="A suberror that has the cause of the error."
     )
 
 
@@ -105,7 +105,9 @@ class ErrorObject:
 
 @dataclass(frozen=True)
 class LogInstanceOptions:
-    ignore_size_limit: bool | None = None
+    ignore_size_limit: bool | None = Field(
+        default=None, description="If true, the log size limit will be ignored."
+    )
 
 
 @dataclass(frozen=True)
@@ -116,7 +118,10 @@ class LogMessage:
     log_level: LogLevelNames
     datetime: datetime.datetime
     message: str
-    ids: list[LogId] | None = None
+    ids: list[LogId] | None = Field(
+        default=None,
+        description="List of log ids to be used for tracing across layers.",
+    )
     # arbitrary extra fields are allowed by convention; not modeled here
 
 
@@ -370,4 +375,4 @@ class GlobalsLayer(Protocol):
 class GlobalsServicesProps:
     environment: str
     working_directory: str
-    runtime_id: str | None = None
+    runtime_id: str | None = Field(default=None, description="The runtime id.")

@@ -42,7 +42,7 @@ class _CrudsWrapper:
 
     def retrieve(self, id):
         inst = self._im.retrieve(id)
-        return None if inst is None else inst.to_pydantic()
+        return None if inst is None else inst.to_pydantic(Box(no_validation=True))
 
     def update(self, id, **kwargs):
         inst = self._im.update(id, **kwargs)
@@ -53,12 +53,9 @@ class _CrudsWrapper:
 
     def search(self, query):
         res = self._im.search(query)
-        try:
-            instances = [i.to_pydantic() for i in res.instances]
-            page = getattr(res, "page", None)
-            return Box(instances=instances, page=page)
-        except Exception:
-            return Box(instances=[], page=None)
+        instances = [i.to_pydantic(Box(no_validation=True)) for i in res.instances]
+        page = getattr(res, "page", None)
+        return Box(instances=instances, page=page)
 
     def bulk_insert(self, data: list[Mapping]) -> list[Mapping]:
         return self._im.bulk_insert(data)
