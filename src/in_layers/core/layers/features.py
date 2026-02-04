@@ -8,7 +8,11 @@ from typing import Any
 from box import Box
 
 from ..globals.libs import extract_cross_layer_props
-from ..libs import combine_cross_layer_props, get_layers_unavailable
+from ..libs import (
+    combine_cross_layer_props,
+    get_layers_unavailable,
+    normalize_cross_layer_props,
+)
 from ..models.libs import get_model_definition, is_model_class
 from ..models.protocols import InLayersModel, PrimaryKeyType
 from ..models.services import create_in_layers_model
@@ -436,10 +440,10 @@ class LayersFeatures:
             args_no_cross, kwargs_no_cross, cross_layer_props = (
                 extract_cross_layer_props(list(args), dict(kwargs))
             )
-            # Combine upstream logger ids with provided cross (if any)
+            # Normalize to Box here so we never pass a Pydantic/object instance into combine or the user's function
+            cross_as_box = normalize_cross_layer_props(cross_layer_props)
             base = {"logging": {"ids": logger_ids}}
-            combined = combine_cross_layer_props(base, cross_layer_props or {})  # type: ignore[arg-type]
-            # Only forward cross to the function if its signature allows it
+            combined = combine_cross_layer_props(base, cross_as_box or {})  # type: ignore[arg-type]
             return _call_with_optional_cross(
                 f, args_no_cross, kwargs_no_cross, combined
             )

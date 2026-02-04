@@ -133,11 +133,46 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ValueError("A configured domain does not have a name.") from e
 
 
+def _normalize_cross_layer_props(props: CrossLayerProps) -> Box:
+    """
+    Accept either dict-like or object-shaped CrossLayerProps; return a Box.
+    Box acts as a dict (.get, []) and supports kwargs-style attribute access.
+    """
+    if not props:
+        return Box({"logging": {"ids": []}}, default_box=True)
+    if isinstance(props, Mapping):
+        logging_val = props.get("logging")
+    else:
+        logging_val = getattr(props, "logging", None)
+    if not logging_val:
+        return Box({"logging": {"ids": []}}, default_box=True)
+    if isinstance(logging_val, Mapping):
+        ids = list(logging_val.get("ids", []))
+        other = {k: v for k, v in logging_val.items() if k != "ids"}
+    else:
+        ids = list(getattr(logging_val, "ids", []))
+        other = {}
+    return Box({"logging": {"ids": ids, **other}}, default_box=True)
+
+
+def normalize_cross_layer_props(props: CrossLayerProps | None) -> Box | None:
+    """
+    Convert CrossLayerProps (dict, Box, or Pydantic/object instance) to Box.
+    Returns None if props is None. Use so framework and user functions
+    always receive Box when cross_layer_props is present.
+    """
+    if props is None:
+        return None
+    return _normalize_cross_layer_props(props)
+
+
 def combine_cross_layer_props(
     a: CrossLayerProps, b: CrossLayerProps
 ) -> CrossLayerProps:
-    a_ids = list(a.get("logging", {}).get("ids", [])) if a.get("logging") else []
-    b_ids = list(b.get("logging", {}).get("ids", [])) if b.get("logging") else []
+    a_norm = _normalize_cross_layer_props(a)
+    b_norm = _normalize_cross_layer_props(b)
+    a_ids = list(a_norm.get("logging", {}).get("ids", []))
+    b_ids = list(b_norm.get("logging", {}).get("ids", []))
 
     existing = {f"{k}:{v}": True for obj in a_ids for k, v in obj.items()}
     unique: list[LogId] = []
@@ -147,7 +182,7 @@ def combine_cross_layer_props(
             if key not in existing:
                 unique.append({k: v})
     final_ids = a_ids + unique
-    logging_other = dict(a.get("logging", {}))
+    logging_other = dict(a_norm.get("logging", {}))
     logging_other.pop("ids", None)
     result: CrossLayerProps = Box(
         {"logging": {"ids": final_ids, **logging_other}}, default_box=True
@@ -167,7 +202,7 @@ def _convert_error_to_cause(error: Exception, code: str, message: str) -> ErrorD
 
 
 def create_error_object(
-    code: str, message: str, error: Any | None = None
+    code: str, message: str, error: Any | None = None, details: str | None = None
 ) -> ErrorObject:
     base = ErrorObject(error=ErrorDetails(code=code, message=message))
     if error is None:
@@ -178,30 +213,38 @@ def create_error_object(
             cause = _convert_error_to_cause(cause, "CauseError", str(cause))
         return ErrorObject(
             error=ErrorDetails(
-                code=code, message=message, details=str(error), cause=cause
+                code=code, message=message, details=details or str(error), cause=cause
             )
         )
     if isinstance(error, str):
         return ErrorObject(
-            error=ErrorDetails(code=code, message=message, details=error)
+            error=ErrorDetails(code=code, message=message, details=details or error)
         )
     if isinstance(error, Mapping):
         try:
             json.dumps(error)
             return ErrorObject(
-                error=ErrorDetails(code=code, message=message, data=dict(error))
+                error=ErrorDetails(
+                    code=code, message=message, details=details, data=dict(error)
+                )
             )
         except Exception:
             return ErrorObject(
-                error=ErrorDetails(code=code, message=message, details=str(error))
+                error=ErrorDetails(
+                    code=code, message=message, details=details or str(error)
+                )
             )
     return ErrorObject(
-        error=ErrorDetails(code=code, message=message, details=str(error))
+        error=ErrorDetails(code=code, message=message, details=details or str(error))
     )
 
 
 def is_error_object(value: Any) -> bool:
-    return isinstance(value, Mapping) and "error" in value
+    if isinstance(value, ErrorObject):
+        return True
+    return isinstance(value, Mapping) and (
+        "error" in value and value["error"] is not None
+    )
 
 
 def _merge(a: Mapping[str, Any], b: Mapping[str, Any]) -> dict[str, Any]:
@@ -222,29 +265,41 @@ def get_namespace(package_name: str, app: str | None = None) -> str:
 
 def is_cross_layer_props(value: Any) -> bool:
     """
-    Shape-based check for cross layer props.
-    Accepts either:
-      - An object with attribute 'logging' that is a Mapping with 'ids' as a list
-      - A Mapping with key 'logging' that is a Mapping with 'ids' as a list
+    True only for dict-shaped cross layer props: Mapping with 'logging' and 'ids' list.
+    Does not return True for object/instance-shaped (e.g. Pydantic). Use
+    is_object_shaped_cross_layer_props for that; call sites must handle that case
+    separately and normalize to Box.
     """
     if value is None:
         return False
-    # Handle Mapping shape first
+    if not isinstance(value, Mapping):
+        return False
+    logging_val = value.get("logging")
+    return isinstance(logging_val, Mapping) and isinstance(logging_val.get("ids"), list)
+
+
+def is_object_shaped_cross_layer_props(value: Any) -> bool:
+    """
+    True when value is cross-layer-props-shaped but as an object (e.g. Pydantic
+    instance from FastMCP), not a dict. Such values must be normalized to Box
+    before use; call sites must check this and normalize.
+    """
+    if value is None:
+        return False
     if isinstance(value, Mapping):
-        logging_val = value.get("logging")
-        return isinstance(logging_val, Mapping) and isinstance(
-            logging_val.get("ids"), list
-        )
-    # Handle objects (e.g., pydantic models) exposing attribute 'logging'
+        return False
     try:
-        logging_attr = getattr(value, "logging", None)
-        if isinstance(logging_attr, Mapping) and isinstance(
-            logging_attr.get("ids"), list
-        ):
-            return True
+        logging_val = getattr(value, "logging", None)
+        if logging_val is None:
+            return False
+        ids = (
+            logging_val.get("ids")
+            if isinstance(logging_val, Mapping)
+            else getattr(logging_val, "ids", None)
+        )
+        return isinstance(ids, list)
     except Exception:
         return False
-    return False
 
 
 def do_nothing_fetcher(model: Any, primary_key: Any) -> Any:  # noqa: ARG001

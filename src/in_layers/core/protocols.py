@@ -137,8 +137,7 @@ class LogMethod(Protocol):
 # ======================================================================
 
 
-@dataclass(frozen=True)
-class CrossLayerLogging:
+class CrossLayerLogging(Protocol):
     """
     Properties useful for logging and tracing across layers.
     """
@@ -150,8 +149,7 @@ class CrossLayerLogging:
     )
 
 
-@dataclass(frozen=True)
-class CrossLayerProps:
+class CrossLayerProps(Protocol):
     """
     Properties that are useful across layers. Useful for passing along logging and tracing information across layers.
     """

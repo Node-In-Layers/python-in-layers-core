@@ -49,6 +49,12 @@ class MemoryBackend(BackendProtocol):
             self.__sequences[key] = 0
         return self.__buckets[key]
 
+    def get_backend_name(self) -> str:
+        return "memory"
+
+    def get_raw_client(self) -> Any:
+        return self
+
     def create(self, model, data):  # type: ignore[override]
         bucket = self.__get_bucket(model)
         payload = dict(data)

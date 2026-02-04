@@ -119,7 +119,9 @@ def test_wrapped_function_result_is_jsonable_in_log_payload():
 
     fn = layer._log_wrap("wrapped", lambda _log, cross_layer_props=None: NotJson())  # type: ignore[call-arg]
     fn(cross_layer_props=None)
-    executed = [m for m in collected if m.get("message") == "Executed features function"]
+    executed = [
+        m for m in collected if m.get("message") == "Executed features function"
+    ]
     assert executed and "result" in executed[-1]
     # `result` should be JSON-serializable without default=str
     json.dumps(executed[-1]["result"])

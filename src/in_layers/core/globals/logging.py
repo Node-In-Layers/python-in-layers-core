@@ -46,6 +46,74 @@ MAX_LOGGING_ATTEMPTS = 5
 DEFAULT_MAX_LOG_SIZE_IN_CHARACTERS = 50000
 
 
+def _handle_special_types(
+    obj: Any, max_depth: int, _depth: int, _seen: set[int]
+) -> tuple[bool, Any]:
+    """Handle Enum, datetime, and bytes types. Returns (handled, value)."""
+    if isinstance(obj, Enum):
+        return True, _to_jsonable(
+            obj.value, max_depth=max_depth, _depth=_depth + 1, _seen=_seen
+        )
+    if isinstance(obj, datetime):
+        return True, obj.isoformat()
+    if isinstance(obj, (bytes, bytearray, memoryview)):
+        b = bytes(obj)
+        try:
+            return True, b.decode("utf-8")
+        except Exception:
+            return True, {"$bytes_b64": base64.b64encode(b).decode("ascii")}
+    return False, None
+
+
+def _handle_structured_types(
+    obj: Any, max_depth: int, _depth: int, _seen: set[int]
+) -> tuple[bool, Any]:
+    """Handle Pydantic models, dataclasses, and exceptions. Returns (handled, value)."""
+    if hasattr(obj, "model_dump") and callable(obj.model_dump):
+        try:
+            dumped = obj.model_dump(mode="json")  # type: ignore[call-arg]
+        except Exception:
+            dumped = obj.model_dump()  # type: ignore[call-arg]
+        return True, _to_jsonable(
+            dumped, max_depth=max_depth, _depth=_depth + 1, _seen=_seen
+        )
+    if is_dataclass(obj):
+        return True, _to_jsonable(
+            asdict(obj), max_depth=max_depth, _depth=_depth + 1, _seen=_seen
+        )
+    if isinstance(obj, BaseException):
+        return True, {
+            "type": type(obj).__name__,
+            "message": str(obj),
+            "args": _to_jsonable(
+                list(getattr(obj, "args", ()) or ()),
+                max_depth=max_depth,
+                _depth=_depth + 1,
+                _seen=_seen,
+            ),
+        }
+    return False, None
+
+
+def _handle_collections(
+    obj: Any, max_depth: int, _depth: int, _seen: set[int]
+) -> tuple[bool, Any]:
+    """Handle mappings and sequences. Returns (handled, value)."""
+    if isinstance(obj, Mapping):
+        out: dict[str, Any] = {}
+        for k, v in obj.items():
+            out[str(k)] = _to_jsonable(
+                v, max_depth=max_depth, _depth=_depth + 1, _seen=_seen
+            )
+        return True, out
+    if isinstance(obj, (list, tuple, set, frozenset)):
+        return True, [
+            _to_jsonable(x, max_depth=max_depth, _depth=_depth + 1, _seen=_seen)
+            for x in list(obj)
+        ]
+    return False, None
+
+
 def _to_jsonable(
     obj: Any,
     *,
@@ -73,58 +141,16 @@ def _to_jsonable(
         return "[Circular]"
     _seen.add(oid)
 
+    handlers = [
+        _handle_special_types,
+        _handle_structured_types,
+        _handle_collections,
+    ]
     try:
-        # Common "value" carriers
-        if isinstance(obj, Enum):
-            return _to_jsonable(obj.value, max_depth=max_depth, _depth=_depth + 1, _seen=_seen)
-
-        # Datetimes (often present in domain data / results)
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-
-        # Bytes
-        if isinstance(obj, (bytes, bytearray, memoryview)):
-            b = bytes(obj)
-            try:
-                return b.decode("utf-8")
-            except Exception:
-                return {"$bytes_b64": base64.b64encode(b).decode("ascii")}
-
-        # Pydantic models (v2) or compatible objects
-        if hasattr(obj, "model_dump") and callable(getattr(obj, "model_dump")):
-            try:
-                dumped = obj.model_dump(mode="json")  # type: ignore[call-arg]
-            except Exception:
-                dumped = obj.model_dump()  # type: ignore[call-arg]
-            return _to_jsonable(dumped, max_depth=max_depth, _depth=_depth + 1, _seen=_seen)
-
-        # Dataclasses
-        if is_dataclass(obj):
-            return _to_jsonable(asdict(obj), max_depth=max_depth, _depth=_depth + 1, _seen=_seen)
-
-        # Exceptions
-        if isinstance(obj, BaseException):
-            return {
-                "type": type(obj).__name__,
-                "message": str(obj),
-                "args": _to_jsonable(list(getattr(obj, "args", ()) or ()), max_depth=max_depth, _depth=_depth + 1, _seen=_seen),
-            }
-
-        # Mappings / sequences
-        if isinstance(obj, Mapping):
-            out: dict[str, Any] = {}
-            for k, v in obj.items():
-                out[str(k)] = _to_jsonable(
-                    v, max_depth=max_depth, _depth=_depth + 1, _seen=_seen
-                )
-            return out
-
-        if isinstance(obj, (list, tuple, set, frozenset)):
-            return [
-                _to_jsonable(x, max_depth=max_depth, _depth=_depth + 1, _seen=_seen)
-                for x in list(obj)
-            ]
-
+        for handler in handlers:
+            handled, value = handler(obj, max_depth, _depth, _seen)
+            if handled:
+                return value
         # As a last resort, prefer stringifying (stable + safe)
         return str(obj)
     finally:
@@ -380,7 +406,8 @@ class _Logger(Logger):  # type: ignore[misc]
             jsonable_data = _to_jsonable(data)
             error_jsonable = (
                 jsonable_data.get("error")
-                if isinstance(jsonable_data, Mapping) and (is_error_like or is_error_obj)
+                if isinstance(jsonable_data, Mapping)
+                and (is_error_like or is_error_obj)
                 else None
             )
             the_data = (

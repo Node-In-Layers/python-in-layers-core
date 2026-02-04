@@ -52,7 +52,7 @@ class GlobalsServices:
 
     def get_constants(self):
         return {
-            "runtime_id": self.props.runtime_id or uuid.uuid4().hex,
+            "runtime_id": self.props.runtime_id or f"{uuid.uuid4()}",
             "working_directory": self.props.working_directory,
             "environment": self.props.environment,
         }

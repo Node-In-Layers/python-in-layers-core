@@ -18,6 +18,7 @@ from .libs import (  # noqa: F401
     get_log_level_number,
     is_config,
     is_error_object,
+    normalize_cross_layer_props,
     validate_config,
 )
 from .models.libs import get_model_definition, model  # noqa: F401
