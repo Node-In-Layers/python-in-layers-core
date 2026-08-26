@@ -169,10 +169,15 @@ def normalize_cross_layer_props(props: CrossLayerProps | None) -> Box | None:
 def combine_cross_layer_props(
     a: CrossLayerProps, b: CrossLayerProps
 ) -> CrossLayerProps:
-    a_norm = _normalize_cross_layer_props(a)
-    b_norm = _normalize_cross_layer_props(b)
-    a_ids = list(a_norm.get("logging", {}).get("ids", []))
-    b_ids = list(b_norm.get("logging", {}).get("ids", []))
+    if not b:
+        if not a:
+            return Box({"logging": {"ids": []}}, default_box=True)
+        return a
+    if not a:
+        return b
+    # a and b may be CrossLayerProps (dataclass), Box, or dict-like; all support .get(...)
+    a_ids = list(a.get("logging", {}).get("ids", []))
+    b_ids = list(b.get("logging", {}).get("ids", []))
 
     existing = {f"{k}:{v}": True for obj in a_ids for k, v in obj.items()}
     unique: list[LogId] = []
@@ -182,7 +187,7 @@ def combine_cross_layer_props(
             if key not in existing:
                 unique.append({k: v})
     final_ids = a_ids + unique
-    logging_other = dict(a_norm.get("logging", {}))
+    logging_other = dict(a.get("logging", {}))
     logging_other.pop("ids", None)
     result: CrossLayerProps = Box(
         {"logging": {"ids": final_ids, **logging_other}}, default_box=True
@@ -211,10 +216,10 @@ def create_error_object(
         cause = getattr(error, "__cause__", None)
         if isinstance(cause, Exception):
             cause = _convert_error_to_cause(cause, "CauseError", str(cause))
+        if not cause:
+            cause = _convert_error_to_cause(error, "CauseError", str(error))
         return ErrorObject(
-            error=ErrorDetails(
-                code=code, message=message, details=details or str(error), cause=cause
-            )
+            error=ErrorDetails(code=code, message=message, details=details, cause=cause)
         )
     if isinstance(error, str):
         return ErrorObject(

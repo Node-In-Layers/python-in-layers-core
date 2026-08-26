@@ -7,6 +7,7 @@ from typing import Any, Literal, Protocol, Self, TypeAlias
 from box import Box
 from pydantic import BaseModel
 from pydantic.dataclasses import dataclass
+from typing_extensions import TypeAliasType
 
 # ==============================
 # Search/Query Type Definitions
@@ -104,19 +105,19 @@ class DatesBeforeQuery:
 
 
 # Queries supported
-type Query = PropertyQuery | DatesAfterQuery | DatesBeforeQuery
+Query: TypeAlias = PropertyQuery | DatesAfterQuery | DatesBeforeQuery
 
 AND = Literal["AND"]
 OR = Literal["OR"]
 
 # Boolean link tokens
-BooleanQuery: TypeAlias = Literal["AND", "OR"]  # noqa: UP040
+BooleanQuery: TypeAlias = Literal["AND", "OR"]
 
 # Recursive token structure:
 # - either a nested list of tokens
 # - or a boolean link
 # - or a concrete query
-type QueryTokens = "list[QueryTokens]" | BooleanQuery | Query
+QueryTokens = TypeAliasType("QueryTokens", "list[QueryTokens]" | BooleanQuery | Query)
 
 
 @dataclass(frozen=True)
@@ -136,7 +137,7 @@ class ModelSearchResult(Protocol):
     page: Any | None
 
 
-type PrimaryKeyType = str | int
+PrimaryKeyType: TypeAlias = str | int
 
 
 @dataclass(frozen=True)

@@ -24,6 +24,7 @@ from .libs import (  # noqa: F401
 from .models.libs import get_model_definition, model  # noqa: F401
 from .models.protocols import (  # noqa: F401
     BackendProtocol,
+    BooleanQuery,
     DatastoreValueType,
     DatesAfterQuery,
     DatesBeforeQuery,
@@ -69,5 +70,6 @@ from .protocols import (  # noqa: F401
     LogLevelNames,
     LogMessage,
     LogMethod,
+    ModelsConfig,
     RootLogger,
 )
