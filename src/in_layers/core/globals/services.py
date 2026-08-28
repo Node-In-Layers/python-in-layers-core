@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -57,10 +57,11 @@ class GlobalsServices:
             "environment": self.props.environment,
         }
 
-    def get_globals(self, common_globals: CommonContext, app: Mapping[str, Any]):
-        if "globals" in app:
-            return app.globals.create(common_globals)
-        return {}
+    def get_globals(self, common_globals: CommonContext, app: Any):
+        globals_layer = getattr(app, "globals", None)
+        if globals_layer is None or not hasattr(globals_layer, "create"):
+            return {}
+        return globals_layer.create(common_globals)
 
 
 def create(props: GlobalsServicesProps) -> GlobalsServices:
