@@ -41,6 +41,7 @@ class LogFormat(str, Enum):
     custom = "custom"
     simple = "simple"
     tcp = "tcp"
+    otel = "otel"
     full = "full"
 
 
@@ -49,6 +50,7 @@ class CoreNamespace(str, Enum):
     globals = "in_layers_core_globals"
     layers = "in_layers_core_layers"
     models = "in_layers_core_models"
+    otel = "in_layers_core_otel"
 
 
 class CommonLayerName(str, Enum):
@@ -65,6 +67,42 @@ class ModelsConfig(Protocol):
     model_services_cruds: bool | None
     #: Optional: When true, wrappers are built around models to bubble up CRUDS interfaces for models through features.
     model_features_cruds: bool | None
+
+
+@dataclass(frozen=True)
+class CrossLayerLoggingOverrides:
+    omit_data: bool | None = Field(
+        default=None,
+        description="When true, one hop of automatic wrap logging omits args and results.",
+    )
+
+
+class CrossLayerLoggingOtel(Protocol):
+    baggage: Mapping[str, str] | None
+
+
+class CombineCrossLayerPropsOptions(Protocol):
+    forward_baggage: bool | None
+
+
+class OtelExporterConfig(Protocol):
+    endpoint: str | None
+    headers: Mapping[str, str] | None
+
+
+class OtelSignalConfig(Protocol):
+    enabled: bool | None
+    exporter: OtelExporterConfig | None
+
+
+class OtelConfig(Protocol):
+    service_name: str | None
+    version: str | None
+    trace: OtelSignalConfig | None
+    logs: OtelSignalConfig | None
+    metrics: OtelSignalConfig | None
+    exporter: OtelExporterConfig | None
+    forward_baggage: bool | None
 
 
 # ======================================================================
@@ -147,6 +185,14 @@ class CrossLayerLogging(Protocol):
         default_factory=list,
         description="List of log ids to be used for tracing across layers.",
     )
+    overrides: CrossLayerLoggingOverrides | Mapping[str, Any] | None = Field(
+        default=None,
+        description="One-hop-only overrides for wrap logging behavior.",
+    )
+    otel: CrossLayerLoggingOtel | Mapping[str, Any] | None = Field(
+        default=None,
+        description="OTEL baggage and related cross-layer data.",
+    )
 
 
 class CrossLayerProps(Protocol):
@@ -216,7 +262,39 @@ class Logger(Protocol):
     def get_ids(self) -> list[LogId]: ...
 
 
-FunctionLogger = Logger
+class FunctionLogWrapOptions(Protocol):
+    args: list[Any] | None
+    cross_layer_props: CrossLayerProps | None
+
+
+class FunctionLogger(Logger, Protocol):
+    def wrap(
+        self,
+        fn: Callable[[], Any],
+        options: FunctionLogWrapOptions | Mapping[str, Any] | None = None,
+    ) -> Any: ...
+
+    def wrap_step(
+        self,
+        name_or_fn: str | Callable[[], Any],
+        fn_or_options: (
+            Callable[[], Any] | FunctionLogWrapOptions | Mapping[str, Any] | None
+        ) = None,
+        options: FunctionLogWrapOptions | Mapping[str, Any] | None = None,
+    ) -> Any: ...
+
+    def wrap_function_call(
+        self,
+        function_name: str,
+        fn: Callable[..., Any],
+        options: FunctionLogWrapOptions | Mapping[str, Any] | None = None,
+    ) -> Any: ...
+
+    def get_function_logger(
+        self,
+        name: str,
+        cross_layer_props: CrossLayerProps | None = None,
+    ) -> FunctionLogger: ...
 
 
 class LayerLogger(Logger, Protocol):
@@ -237,12 +315,6 @@ class LayerLogger(Logger, Protocol):
         function_name: str,
         func: Callable[..., Any],
     ) -> Callable[..., Any]: ...
-
-    def get_function_logger(
-        self,
-        name: str,
-        cross_layer_props: CrossLayerProps | None = None,
-    ) -> FunctionLogger: ...
 
     def get_inner_logger(
         self,
@@ -284,6 +356,7 @@ class CoreLoggingConfig(Protocol):
     ignore_layer_functions: list[str]
     # (layerName, functionName?) -> logLevel
     get_function_wrap_log_level: Callable[[str, str | None], LogLevelNames] | None
+    otel: OtelConfig | Mapping[str, Any] | None
 
 
 # ======================================================================
@@ -321,10 +394,21 @@ class CoreConfig(Protocol):
     domains: list[Domain]
     # Name of the domain whose services provide model backend resolution
     model_backend: str | None
-    model_cruds: bool
+    model_cruds: bool | None
+    model_cruds_factory: Callable[..., Any] | list[Mapping[str, Any]] | None
+    no_model_log_wrap: bool | None
     # Back-compat fields (deprecated):
     model_factory: str | None
     custom_model_factory: Mapping[str, Any] | None
+
+
+@dataclass(frozen=True)
+class AnnotatedFunctionProps:
+    function_name: str
+    domain: str
+    args_schema: Any
+    returns_schema: Any | None = None
+    description: str | None = None
 
 
 class Config(Protocol):

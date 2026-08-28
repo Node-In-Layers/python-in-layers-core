@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Self
 
 from box import Box
@@ -170,6 +170,79 @@ def create_in_layers_model(
     Public helper to wrap a Pydantic model into an InLayersModel with the provided backend.
     """
     return _InLayersModelImpl(pydantic_model, backend)
+
+
+class _ModelCruds:
+    def __init__(self, methods: Mapping[str, Any]):
+        for key, value in methods.items():
+            setattr(self, key, value)
+
+
+def create_model_cruds(  # noqa: C901
+    model_or_getter: InLayersModel | Callable[[], InLayersModel],
+    options: Mapping[str, Any] | None = None,
+):
+    def _get_model() -> InLayersModel:
+        if callable(model_or_getter):
+            return model_or_getter()
+        return model_or_getter
+
+    raw_overrides = (options or {}).get("overrides") or {}
+    if isinstance(raw_overrides, Mapping):
+        overrides = dict(raw_overrides)
+    else:
+        overrides = {
+            key: getattr(raw_overrides, key)
+            for key in dir(raw_overrides)
+            if not key.startswith("_") and callable(getattr(raw_overrides, key))
+        }
+
+    def get_model():
+        return _get_model()
+
+    def _default_create(data=None, **kwargs):
+        inst = _get_model().create(data, **kwargs)
+        return inst.to_pydantic()
+
+    def _default_retrieve(id):
+        inst = _get_model().retrieve(id)
+        return None if inst is None else inst.to_pydantic(Box(no_validation=True))
+
+    def _default_update(id, **kwargs):
+        inst = _get_model().update(id, **kwargs)
+        return inst.to_pydantic()
+
+    def _default_delete(id):
+        _get_model().delete(id)
+
+    def _default_search(query):
+        result = _get_model().search(query)
+        return Box(
+            instances=[
+                instance.to_pydantic(Box(no_validation=True))
+                for instance in result.instances
+            ],
+            page=getattr(result, "page", None),
+        )
+
+    def _default_bulk_insert(data: list[Mapping]) -> None:
+        _get_model().bulk_insert(data)
+
+    def _default_bulk_delete(ids: list[PrimaryKeyType]) -> None:
+        _get_model().bulk_delete(ids)
+
+    return _ModelCruds(
+        {
+            "get_model": get_model,
+            "create": overrides.get("create") or _default_create,
+            "retrieve": overrides.get("retrieve") or _default_retrieve,
+            "update": overrides.get("update") or _default_update,
+            "delete": overrides.get("delete") or _default_delete,
+            "search": overrides.get("search") or _default_search,
+            "bulk_insert": overrides.get("bulk_insert") or _default_bulk_insert,
+            "bulk_delete": overrides.get("bulk_delete") or _default_bulk_delete,
+        }
+    )
 
 
 class ModelsServices:

@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from types import ModuleType
 from typing import Any
 
+from box import Box
+
 from ..models.libs import is_model_class
 from ..protocols import Domain, LayerContext, ServicesContext
 
@@ -91,10 +93,12 @@ class LayersServices:
         """
         resolver = _ModelResolver(_build_domain_model_index(context))
 
-        return {
-            "context": context,
-            "get_model": resolver.get_model,
-        }
+        return Box(
+            {
+                "context": context,
+                "get_model": resolver.get_model,
+            }
+        )
 
     def load_layer(self, app: Domain, layer: str, context: LayerContext):
         layer_instance = getattr(app, layer, None)
@@ -103,7 +107,7 @@ class LayersServices:
         instance = layer_instance.create(context)
         if instance is None:
             raise RuntimeError(
-                f"App {app.get('name')} did not return an instance layer {layer}"
+                f"App {getattr(app, 'name', '<unknown>')} did not return an instance layer {layer}"
             )
         return instance
 

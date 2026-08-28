@@ -31,11 +31,11 @@ def create_model_services(models: list[InLayersModel]) -> ModelServices:
     :return: Description
     :rtype: dict[str, InLayersModel]
     """
-    models = {}
+    built_models = {}
     for model in models:
         meta = model.get_model_definition()
-        models[meta.plural_name] = model
-    return models
+        built_models[meta.plural_name] = model
+    return built_models
 
 
 def is_model_class(obj: Any) -> bool:

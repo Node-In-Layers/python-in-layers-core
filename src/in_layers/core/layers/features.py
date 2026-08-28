@@ -9,13 +9,14 @@ from box import Box
 
 from ..globals.libs import extract_cross_layer_props
 from ..libs import (
-    combine_cross_layer_props,
+    create_cross_layer_props,
     get_layers_unavailable,
+    get_otel_forward_baggage_from_config,
     normalize_cross_layer_props,
 )
 from ..models.libs import get_model_definition, is_model_class
 from ..models.protocols import InLayersModel, PrimaryKeyType
-from ..models.services import create_in_layers_model
+from ..models.services import create_in_layers_model, create_model_cruds
 from ..protocols import (
     CommonContext,
     CoreNamespace,
@@ -31,6 +32,27 @@ _CROSS_PARAM_NAMES = {
 }
 
 _INTERNAL_MODELS_KEY = "__in_layers_models"
+
+
+class _WrappedCruds:
+    def __init__(self, methods: Mapping[str, Any]):
+        for key, value in methods.items():
+            setattr(self, key, value)
+
+
+def _core_model_settings(config: Any) -> Mapping[str, Any]:
+    core = getattr(config, "in_layers_core", {}) or {}
+    models = getattr(core, "models", {}) or {}
+    merged = {}
+    if isinstance(models, Mapping):
+        merged.update(models)
+    else:
+        merged.update(getattr(models, "__dict__", {}))
+    if isinstance(core, Mapping):
+        merged.update(core)
+    else:
+        merged.update(getattr(core, "__dict__", {}))
+    return Box(merged)
 
 
 class _CrudsWrapper:
@@ -95,6 +117,25 @@ class _FeatureCruds:
 
     def bulk_delete(self, ids: list[PrimaryKeyType]) -> None:
         return self._base.bulk_delete(ids)
+
+
+def _is_model_services_cruds_enabled(config: Any) -> bool:
+    settings = _core_model_settings(config)
+    return bool(
+        settings.get("model_services_cruds")
+        or settings.get("model_features_cruds")
+        or settings.get("model_cruds")
+    )
+
+
+def _is_model_features_cruds_enabled(config: Any) -> bool:
+    settings = _core_model_settings(config)
+    return bool(settings.get("model_features_cruds") or settings.get("model_cruds"))
+
+
+def _get_no_model_log_wrap(config: Any) -> bool:
+    settings = _core_model_settings(config)
+    return bool(settings.get("no_model_log_wrap"))
 
 
 def _resolve_backend_for_model(
@@ -168,24 +209,37 @@ def _build_services_cruds(simple_models_map: Mapping[str, Any]) -> Mapping[str, 
     return Box(cruds_wrappers)
 
 
+def _resolve_model_cruds_factory(
+    features: LayersFeatures,
+    layer_name: str,
+    domain_name: str,
+    model_name: str,
+):
+    config = _core_model_settings(features.context.config)
+    factory_config = config.get("model_cruds_factory")
+    if callable(factory_config):
+        return factory_config
+    if isinstance(factory_config, list):
+        for override in factory_config:
+            if override.get("layer") not in (None, layer_name):
+                continue
+            if override.get("domain") not in (None, domain_name):
+                continue
+            if override.get("model") not in (None, model_name):
+                continue
+            factory = override.get("factory")
+            if callable(factory):
+                return factory
+    return lambda model, _context, options=None: create_model_cruds(model, options)
+
+
 def _maybe_add_services_cruds(
     features: LayersFeatures,
     layer_context: Mapping[str, Any],
     app: Mapping[str, Any],
     final_layer: Mapping[str, Any],
 ) -> Mapping[str, Any]:
-    services_cruds_flag = bool(
-        rgetattr(
-            features, "context.config.in_layers_core.models.model_services_cruds", False
-        )
-    )
-    features_cruds_flag = bool(
-        rgetattr(
-            features, "context.config.in_layers_core.models.model_features_cruds", False
-        )
-    )
-    services_cruds_enabled = services_cruds_flag or features_cruds_flag
-    if not services_cruds_enabled:
+    if not _is_model_services_cruds_enabled(features.context.config):
         return final_layer
     models_ctx = layer_context.get("models", {})  # type: ignore[assignment]
     domain_models_entry = (
@@ -196,9 +250,17 @@ def _maybe_add_services_cruds(
         if isinstance(domain_models_entry, Mapping)
         else Box({})
     )
-    cruds_wrappers = _build_services_cruds(simple_models or Box({}))
-    new_final = dict(final_layer)
-    new_final["cruds"] = cruds_wrappers
+    cruds_wrappers = {
+        plural_name: _resolve_model_cruds_factory(
+            features, "services", app.name, plural_name
+        )(
+            simple_model,
+            layer_context,
+        )
+        for plural_name, simple_model in dict(simple_models or {}).items()
+    }
+    new_final = _coerce_layer_to_mapping(final_layer)
+    new_final["cruds"] = Box(cruds_wrappers)
     return new_final
 
 
@@ -208,20 +270,29 @@ def _maybe_add_features_cruds(
     app: Mapping[str, Any],
     final_layer: Mapping[str, Any],
 ) -> Mapping[str, Any]:
-    if not _is_features_cruds_enabled(features):
+    if not _is_model_features_cruds_enabled(features.context.config):
         return final_layer
     service_cruds = _get_service_cruds_for_domain(layer_context, app)
     if not isinstance(service_cruds, Mapping):
         return final_layer
-    feature_wrappers = _wrap_service_cruds_for_features(service_cruds)
-    new_final = dict(final_layer)
+    feature_wrappers = {
+        plural_name: _resolve_model_cruds_factory(
+            features, "features", app.name, plural_name
+        )(
+            lambda svc_crud=svc_crud: svc_crud.get_model(),
+            layer_context,
+            {"overrides": svc_crud},
+        )
+        for plural_name, svc_crud in dict(service_cruds).items()
+    }
+    new_final = _coerce_layer_to_mapping(final_layer)
     new_final["cruds"] = Box(feature_wrappers)
     return new_final
 
 
 def _is_features_cruds_enabled(features: LayersFeatures) -> bool:
     try:
-        return bool(features.context.config.in_layers_core.models.model_features_cruds)
+        return _is_model_features_cruds_enabled(features.context.config)
     except Exception:
         return False
 
@@ -277,8 +348,7 @@ def _create_wrapper_with_metadata(original_func: Any, inner_callable: Any) -> An
 
 def _iter_properties_for_wrap(obj: Any):
     if isinstance(obj, Mapping):
-        for k, v in obj.items():
-            yield from (k, v)
+        yield from obj.items()
         return
     for name in dir(obj):
         if name.startswith("_"):
@@ -288,6 +358,12 @@ def _iter_properties_for_wrap(obj: Any):
         except Exception:  # noqa: S112
             continue
         yield name, attr
+
+
+def _coerce_layer_to_mapping(layer: Any) -> dict[str, Any]:
+    if isinstance(layer, Mapping):
+        return dict(layer)
+    return {name: value for name, value in _iter_properties_for_wrap(layer)}
 
 
 def _get_params_for_func(fn: Any) -> list[inspect.Parameter]:
@@ -426,6 +502,18 @@ def _build_wrapped_context_for_load(
 class LayersFeatures:
     def __init__(self, context: FeaturesContext):
         self.context = context
+        self._finalized_services_domains: Mapping[str, Any] = {}
+        self._finalized_features_domains: Mapping[str, Any] = {}
+        ordered_layers: list[str] = []
+        for layer in context.config.in_layers_core.layer_order:
+            if isinstance(layer, list):
+                ordered_layers.extend(layer)
+            else:
+                ordered_layers.append(layer)
+        self._ordered_layers = ordered_layers
+        self._features_layer_index = (
+            ordered_layers.index("features") if "features" in ordered_layers else -1
+        )
 
     def _get_layer_context(
         self, common_context: Mapping[str, Any], layer: Mapping[str, Any] | None
@@ -435,6 +523,36 @@ class LayersFeatures:
             return merged + Box(layer)
         return common_context
 
+    def _can_access_features(self, layer_name: str) -> bool:
+        if self._features_layer_index == -1:
+            return False
+        try:
+            return self._ordered_layers.index(layer_name) >= self._features_layer_index
+        except ValueError:
+            return False
+
+    def _get_services(self, domain: str):
+        return self._finalized_services_domains.get(domain)
+
+    def _get_features(self, domain: str):
+        return self._finalized_features_domains.get(domain)
+
+    def _add_finalized_domain_getters(
+        self, layer_context: Mapping[str, Any], current_layer: str
+    ) -> Mapping[str, Any]:
+        next_services = dict(layer_context.get("services", {}))
+        next_services["get_services"] = self._get_services
+        next_services["getServices"] = self._get_services
+        updated = dict(layer_context)
+        updated["services"] = Box(next_services)
+        if not self._can_access_features(current_layer):
+            return Box(updated)
+        next_features = dict(layer_context.get("features", {}))
+        next_features["get_features"] = self._get_features
+        next_features["getFeatures"] = self._get_features
+        updated["features"] = Box(next_features)
+        return Box(updated)
+
     def _make_wrapped(self, f, logger_ids):
         def _inner2(*args, **kwargs):
             args_no_cross, kwargs_no_cross, cross_layer_props = (
@@ -442,8 +560,12 @@ class LayersFeatures:
             )
             # Normalize to Box here so we never pass a Pydantic/object instance into combine or the user's function
             cross_as_box = normalize_cross_layer_props(cross_layer_props)
-            base = {"logging": {"ids": logger_ids}}
-            combined = combine_cross_layer_props(base, cross_as_box or {})  # type: ignore[arg-type]
+            helper_logger = Box(get_ids=lambda: logger_ids)
+            combined = create_cross_layer_props(
+                helper_logger,
+                cross_as_box or {},
+                get_otel_forward_baggage_from_config(self.context.config),
+            )
             return _call_with_optional_cross(
                 f, args_no_cross, kwargs_no_cross, combined
             )
@@ -477,6 +599,38 @@ class LayersFeatures:
                 wrapped = _create_wrapper_with_metadata(func, logged_func)
             out[property_name] = wrapped
         return out
+
+    def _wrap_cruds_container(
+        self,
+        cruds_container: Mapping[str, Any],
+        layer_logger,
+        app_name: str,
+        layer: str,
+        ignore_layer_functions: list[str],
+    ) -> Mapping[str, Any]:
+        if _get_no_model_log_wrap(self.context.config):
+            return Box(cruds_container)
+        wrapped_models: dict[str, Any] = {}
+        for model_name, cruds in dict(cruds_container).items():
+            wrapped_cruds: dict[str, Any] = {}
+            for function_name, func in _coerce_layer_to_mapping(cruds).items():
+                if function_name == "get_model" or not callable(func):
+                    wrapped_cruds[function_name] = func
+                    continue
+                function_level_key = f"{app_name}.{layer}.{model_name}.{function_name}"
+                if _should_ignore_path(ignore_layer_functions, function_level_key):
+                    wrapped_cruds[function_name] = func
+                    continue
+                cross_wrapped = self._make_wrapped(func, layer_logger.get_ids())
+                logged_func = layer_logger._log_wrap(
+                    f"cruds:{model_name}:{function_name}",
+                    _make_passthrough_for_log(cross_wrapped),
+                )
+                wrapped_cruds[function_name] = _create_wrapper_with_metadata(
+                    func, logged_func
+                )
+            wrapped_models[model_name] = _WrappedCruds(wrapped_cruds)
+        return Box(wrapped_models)
 
     def _inject_models_context(
         self, app: Mapping[str, Any], layer_context: Mapping[str, Any]
@@ -512,20 +666,27 @@ class LayersFeatures:
         composite_layers,
         common_context: Mapping[str, Any],
         previous_layer: Mapping[str, Any] | None,  # noqa: ARG002
-        anti_layers_fn,  # noqa: ARG002
+        anti_layers_fn,
     ):
         result = {}
         for layer in composite_layers:
+            layers_to_remove = anti_layers_fn(layer)
+            visible_context = {
+                k: v
+                for k, v in dict(common_context).items()
+                if k not in layers_to_remove
+            }
+            visible_context = self._add_finalized_domain_getters(visible_context, layer)
             layer_logger = (
                 self.context.root_logger.get_logger(
                     Box(
-                        common_context,
+                        visible_context,
                     )
                 )
                 .get_app_logger(app.name)
                 .get_layer_logger(layer)
             )
-            the_context = dict(common_context)
+            the_context = dict(visible_context)
             the_context["log"] = layer_logger
             wrapped_context = the_context
             loaded = self.context.services[CoreNamespace.layers.value].load_layer(
@@ -542,6 +703,15 @@ class LayersFeatures:
                 final_layer = self._wrap_layer_functions(
                     loaded, layer_logger, app.name, layer, ignore_layer_functions
                 )
+                if isinstance(final_layer, Mapping) and "cruds" in final_layer:
+                    final_layer = dict(final_layer)
+                    final_layer["cruds"] = self._wrap_cruds_container(
+                        final_layer["cruds"],
+                        layer_logger,
+                        app.name,
+                        layer,
+                        ignore_layer_functions,
+                    )
                 result = {**result, layer: {app.name: final_layer}}
         return result
 
@@ -551,8 +721,16 @@ class LayersFeatures:
         current_layer: str,
         common_context: Mapping[str, Any],
         previous_layer: Mapping[str, Any] | None,
+        anti_layers_fn,
     ):
-        layer_context1 = self._get_layer_context(common_context, previous_layer)
+        layers_to_remove = anti_layers_fn(current_layer)
+        visible_context = {
+            k: v for k, v in dict(common_context).items() if k not in layers_to_remove
+        }
+        layer_context1 = self._get_layer_context(visible_context, previous_layer)
+        layer_context1 = self._add_finalized_domain_getters(
+            layer_context1, current_layer
+        )
         layer_logger = (
             self.context.root_logger.get_logger(Box(layer_context1))
             .get_app_logger(app.name)
@@ -580,17 +758,27 @@ class LayersFeatures:
         )
         if not loaded:
             return {}
-        final_layer = self._wrap_layer_functions(
-            loaded, layer_logger, app.name, current_layer, ignore_layer_functions
-        )
         # Inject model CRUD wrappers into services/features when enabled
+        final_loaded = loaded
         if str(current_layer) == "services":
-            final_layer = _maybe_add_services_cruds(
-                self, layer_context, app, final_layer
+            final_loaded = _maybe_add_services_cruds(
+                self, layer_context, app, final_loaded
             )
         if str(current_layer) == "features":
-            final_layer = _maybe_add_features_cruds(
-                self, layer_context, app, final_layer
+            final_loaded = _maybe_add_features_cruds(
+                self, layer_context, app, final_loaded
+            )
+        final_layer = self._wrap_layer_functions(
+            final_loaded, layer_logger, app.name, current_layer, ignore_layer_functions
+        )
+        if isinstance(final_layer, Mapping) and "cruds" in final_layer:
+            final_layer = dict(final_layer)
+            final_layer["cruds"] = self._wrap_cruds_container(
+                final_layer["cruds"],
+                layer_logger,
+                app.name,
+                current_layer,
+                ignore_layer_functions,
             )
         return {current_layer: {app.name: final_layer}}
 
@@ -623,6 +811,7 @@ class LayersFeatures:
                         layer,
                         {k: v for k, v in existing_layers.items() if k != "log"},
                         previous_layer,
+                        anti_layers,
                     )
                 if not layer_instance:
                     previous_layer = {}
@@ -643,7 +832,15 @@ class LayersFeatures:
                 if "log" in new_context:
                     new_context = {k: v for k, v in new_context.items() if k != "log"}
                 existing_layers = new_context
+                self._finalized_services_domains = Box(
+                    existing_layers.get("services", {})
+                )
+                self._finalized_features_domains = Box(
+                    existing_layers.get("features", {})
+                )
                 previous_layer = layer_instance
+        self._finalized_services_domains = Box(existing_layers.get("services", {}))
+        self._finalized_features_domains = Box(existing_layers.get("features", {}))
         return Box(
             existing_layers,
         )

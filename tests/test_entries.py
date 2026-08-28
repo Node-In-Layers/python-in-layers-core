@@ -55,3 +55,16 @@ def test_load_system_end_to_end():
     call_ping = sys.features.demo.callPing("y")[0]
     assert ping[0:5] == "pong:"
     assert call_ping[0:6] == "pong:y"
+
+
+def test_load_system_sets_up_otel_services(monkeypatch):
+    calls: list[str] = []
+
+    def fake_create(_context):
+        return Box(setup_otel=lambda: calls.append("setup"))
+
+    monkeypatch.setattr("in_layers.core.entries.otel_services.create", fake_create)
+
+    _ = load_system(SystemProps(environment="test", config=_config()))
+
+    assert calls == ["setup"]

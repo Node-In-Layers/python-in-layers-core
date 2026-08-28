@@ -436,6 +436,130 @@ def test_layers_puts_cruds_in_features():
         assert False
 
 
+def test_layers_support_custom_model_cruds_factory():
+    @model(domain="mydomain", plural_name="MyModels")
+    class MyModel(BaseModel):
+        id: str
+        name: str
+
+    class MyServices:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+    class CustomCruds:
+        def get_model(self):
+            return "custom-model"
+
+        def create(self, data=None, cross_layer_props=None, **kwargs):
+            payload = dict(data or {})
+            payload.update(kwargs)
+            return Box(source="factory", payload=payload, cross=cross_layer_props)
+
+    class MyDomain(Domain):
+        name = "mydomain"
+        services = SimpleNamespace(create=MyServices)
+        models = SimpleNamespace(MyModel=MyModel)
+
+    config = Box(
+        system_name="test",
+        environment="test",
+        in_layers_core=Box(
+            logging=Box(
+                log_level=LogLevelNames.info,
+                log_format=LogFormat.simple,
+            ),
+            layer_order=["services", "features"],
+            domains=[MyDomain],
+            models=Box(model_services_cruds=True),
+            model_cruds_factory=lambda model, _context, options=None: CustomCruds(),  # noqa: ARG005
+        ),
+    )
+
+    sys = load_system(SystemProps(environment="test", config=config))
+    result = sys.services.mydomain.cruds.MyModels.create(name="John Doe")
+
+    assert result.source == "factory"
+    assert result.payload == {"name": "John Doe"}
+    assert result.cross.logging.ids
+
+
+def test_layers_can_disable_model_log_wrap():
+    @model(domain="mydomain", plural_name="MyModels")
+    class MyModel(BaseModel):
+        id: str
+        name: str
+
+    class MyServices:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+    class MyDomain(Domain):
+        name = "mydomain"
+        services = SimpleNamespace(create=MyServices)
+        models = SimpleNamespace(MyModel=MyModel)
+
+    config = Box(
+        system_name="test",
+        environment="test",
+        in_layers_core=Box(
+            logging=Box(
+                log_level=LogLevelNames.info,
+                log_format=LogFormat.simple,
+            ),
+            layer_order=["services", "features"],
+            domains=[MyDomain],
+            models=Box(model_services_cruds=True),
+            no_model_log_wrap=True,
+        ),
+    )
+
+    sys = load_system(SystemProps(environment="test", config=config))
+
+    assert not hasattr(sys.services.mydomain.cruds.MyModels.create, "__wrapped__")
+
+
+def test_layers_expose_late_bound_domain_getters():
+    class FirstServices:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+        def service_name(self):
+            return callable(self._ctx.services.get_services("demo").service_name)
+
+    class DemoFeatures:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+        def names(self):
+            return (
+                callable(self._ctx.services.get_services("demo").service_name),
+                callable(self._ctx.features.get_features("demo").names),
+            )
+
+    class DemoDomain(Domain):
+        name = "demo"
+        services = SimpleNamespace(create=FirstServices)
+        features = SimpleNamespace(create=DemoFeatures)
+
+    config = Box(
+        system_name="test",
+        environment="test",
+        in_layers_core=Box(
+            logging=Box(
+                log_level=LogLevelNames.info,
+                log_format=LogFormat.simple,
+            ),
+            layer_order=["services", "features"],
+            domains=[DemoDomain],
+        ),
+    )
+
+    sys = load_system(SystemProps(environment="test", config=config))
+
+    assert sys.services.demo.service_name() is True
+    assert sys.features.demo.names() == (True, True)
+
+
 # Tests for _call_with_optional_cross
 
 

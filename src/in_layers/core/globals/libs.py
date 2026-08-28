@@ -7,7 +7,7 @@ from typing import Any
 from box import Box
 
 from ..libs import (
-    combine_cross_layer_props,
+    create_cross_layer_props,
     is_cross_layer_props,
     is_object_shaped_cross_layer_props,
     normalize_cross_layer_props,
@@ -26,10 +26,10 @@ def default_get_function_wrap_log_level(layer_name: str) -> LogLevelNames:
 def combine_logging_props(
     logger: Logger, cross_layer_props: CrossLayerProps | None = None
 ) -> Mapping[str, Any]:
-
-    base: CrossLayerProps = {"logging": {"ids": logger.get_ids()}}
-    final = combine_cross_layer_props(base, cross_layer_props or {})  # type: ignore[arg-type]
-    return final["logging"]
+    final = create_cross_layer_props(logger, cross_layer_props or {})
+    logging_props = dict(final["logging"])
+    logging_props.pop("overrides", None)
+    return logging_props
 
 
 def cap_for_logging(input: Any, max_size: int = 50000) -> Any:

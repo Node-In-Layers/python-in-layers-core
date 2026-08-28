@@ -11,11 +11,19 @@ from .globals.logging import (  # noqa: F401
     standard_logger,
 )
 from .libs import (  # noqa: F401
+    annotated_function,
+    annotation_function_props,
     combine_cross_layer_props,
+    create_cross_layer_props,
     create_error_object,
+    cross_layer_props_with_logging_overrides,
+    cross_layer_props_with_otel_baggage,
+    error_object_schema,
     get_layers_unavailable,
     get_log_level_name,
     get_log_level_number,
+    get_otel_baggage_from_cross_layer_props,
+    get_otel_forward_baggage_from_config,
     is_config,
     is_error_object,
     normalize_cross_layer_props,
@@ -46,13 +54,42 @@ from .models.protocols import (  # noqa: F401
 from .models.query import (  # noqa: F401
     query_builder,
 )
+from .models.services import create_in_layers_model, create_model_cruds  # noqa: F401
+from .otel.libs import (  # noqa: F401
+    OTEL_ID_ATTRIBUTE_PREFIX,
+    create_otel_log_method,
+    ids_to_attributes,
+    ids_to_otel_attributes,
+    layer_metric_attrs,
+    layer_span_name,
+    log_level_to_otel_severity,
+    log_message_to_otel_attributes,
+    span_attributes_from_ids,
+    span_kind_for_layer,
+)
+from .otel.types import (  # noqa: F401
+    AttributesMap,
+    CounterLike,
+    HistogramLike,
+    OtelLogsService,
+    OtelMetricsService,
+    OtelServices,
+    OtelTraceService,
+    RunWithTraceAndMetricsOptions,
+    SpanContextLike,
+    SpanLike,
+)
 from .protocols import (  # noqa: F401
+    AnnotatedFunctionProps,
     AppLayer,
+    CombineCrossLayerPropsOptions,
     CommonContext,
     Config,
     CoreConfig,
     CoreLoggingConfig,
     CoreNamespace,
+    CrossLayerLoggingOtel,
+    CrossLayerLoggingOverrides,
     CrossLayerProps,
     Domain,
     ErrorObject,
@@ -71,5 +108,8 @@ from .protocols import (  # noqa: F401
     LogMessage,
     LogMethod,
     ModelsConfig,
+    OtelConfig,
+    OtelExporterConfig,
+    OtelSignalConfig,
     RootLogger,
 )

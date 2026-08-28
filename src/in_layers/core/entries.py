@@ -13,6 +13,8 @@ from .layers import features as layers_features
 from .layers import name as layers_name
 from .layers import services as layers_services
 from .models import services as core_model_services
+from .otel import name as otel_name
+from .otel import services as otel_services
 from .protocols import Config, CoreNamespace, FeaturesContext, GlobalsServicesProps
 
 
@@ -40,6 +42,8 @@ def load_system(props: SystemProps) -> Any:
         ),
     )
     globals_context = global_features.load_globals(props.config or props.environment)
+    the_otel_services = otel_services.create(cast(Box, globals_context))
+    the_otel_services.setup_otel()
 
     # layers
 
@@ -55,6 +59,7 @@ def load_system(props: SystemProps) -> Any:
                         CoreNamespace.models.value: core_model_services.create(
                             cast(Box, globals_context)
                         ),
+                        otel_name: the_otel_services,
                     },
                 }
             ),
