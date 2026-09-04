@@ -6,6 +6,7 @@ import pytest
 from box import Box
 
 from in_layers.core.globals.logging import composite_logger, standard_logger
+from in_layers.core.libs import cross_layer_props_with_logging_overrides
 from in_layers.core.protocols import CoreNamespace, LogLevelNames, RootLogger
 import json
 
@@ -92,6 +93,43 @@ def test_wrapper_logs_use_custom_wrap_level():
         "Executing features function" in m or "Executed features function" in m
         for m in collected
     )
+
+
+def test_log_wrap_supports_omit_data_override_from_helper():
+    collected: list[dict[str, Any]] = []
+
+    def method(_c):
+        def log_fn(msg):
+            collected.append(msg)  # type: ignore[arg-type]
+
+        return log_fn
+
+    root: RootLogger = composite_logger([method])
+    ctx = _ctx(
+        {
+            "log_level": LogLevelNames.info,
+            "log_format": "simple",
+            "get_function_wrap_log_level": lambda _layer, _fn: LogLevelNames.info,
+        }
+    )
+    layer = root.get_logger(ctx).get_app_logger("demo").get_layer_logger("features")
+    fn = layer._log_wrap(
+        "wrapped",
+        lambda _log, payload, cross_layer_props=None: {"ok": True, "size": len(payload)},  # type: ignore[call-arg]
+    )
+    cross_layer_props = cross_layer_props_with_logging_overrides({"omit_data": True})
+
+    result = fn({"secret": "value"}, cross_layer_props=cross_layer_props)
+
+    assert result == {"ok": True, "size": 1}
+    executing = next(
+        m for m in collected if m["message"] == "Executing features function"
+    )
+    executed = next(
+        m for m in collected if m["message"] == "Executed features function"
+    )
+    assert "args" not in executing
+    assert "result" not in executed
 
 
 def test_function_logger_wrap_supports_omit_data_override():

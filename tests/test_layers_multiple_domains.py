@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 from box import Box
 
@@ -212,3 +213,108 @@ def test_cross_layer_props_flow_across_domains_and_back():
         1 for obj in ids if isinstance(obj, dict) and "function_call_id" in obj
     )
     assert num_function_call_ids == 3
+
+
+def test_load_system_with_many_domains_scales_reasonably():
+    small_domain_count = 3
+    large_domain_count = 10
+    methods_per_layer = 40
+    max_large_load_seconds = 2.5
+
+    def _build_service_class(domain_name: str):
+        namespace = {}
+
+        def __init__(self, ctx):
+            self.context = ctx
+
+        namespace["__init__"] = __init__
+
+        for index in range(methods_per_layer):
+
+            def _method(
+                self,
+                value,
+                cross_layer_props=None,
+                _index=index,
+                _domain_name=domain_name,
+            ):
+                return f"{_domain_name}:{_index}:{value}"
+
+            namespace[f"ping_{index}"] = _method
+
+        return type(f"{domain_name.title()}Services", (), namespace)
+
+    def _build_feature_class(domain_name: str):
+        namespace = {}
+
+        def __init__(self, ctx):
+            self.context = ctx
+
+        namespace["__init__"] = __init__
+
+        for index in range(methods_per_layer):
+
+            def _method(
+                self,
+                value,
+                cross_layer_props=None,
+                _index=index,
+                _domain_name=domain_name,
+            ):
+                return getattr(self.context.services[_domain_name], f"ping_{_index}")(
+                    value,
+                    cross_layer_props,
+                )
+
+            namespace[f"call_{index}"] = _method
+
+        return type(f"{domain_name.title()}Features", (), namespace)
+
+    def _build_domain(index: int):
+        domain_name = f"domain_{index}"
+        service_class = _build_service_class(domain_name)
+        feature_class = _build_feature_class(domain_name)
+        return type(
+            f"Domain{index}",
+            (Domain,),
+            {
+                "name": domain_name,
+                "services": SimpleNamespace(
+                    create=lambda ctx, _service_class=service_class: _service_class(ctx)
+                ),
+                "features": SimpleNamespace(
+                    create=lambda ctx, _feature_class=feature_class: _feature_class(ctx)
+                ),
+            },
+        )
+
+    def _build_config(domain_count: int):
+        return Box(
+            system_name="test",
+            environment="test",
+            in_layers_core=Box(
+                logging=Box(
+                    log_level=LogLevelNames.info,
+                    log_format=LogFormat.simple,
+                ),
+                layer_order=["services", "features"],
+                domains=[_build_domain(index) for index in range(1, domain_count + 1)],
+            ),
+        )
+
+    small_started = time.perf_counter()
+    load_system(
+        SystemProps(environment="test", config=_build_config(small_domain_count))
+    )
+    _ = time.perf_counter() - small_started
+
+    large_started = time.perf_counter()
+    system = load_system(
+        SystemProps(environment="test", config=_build_config(large_domain_count))
+    )
+    large_elapsed = time.perf_counter() - large_started
+
+    assert large_elapsed < max_large_load_seconds
+    assert "context" not in system.services.domain_10
+    assert "context" not in system.features.domain_10
+    assert system.features.domain_10.call_39("x") == "domain_10:39:x"

@@ -357,7 +357,8 @@ def _iter_properties_for_wrap(obj: Any):
             attr = getattr(obj, name)
         except Exception:  # noqa: S112
             continue
-        yield name, attr
+        if callable(attr):
+            yield name, attr
 
 
 def _coerce_layer_to_mapping(layer: Any) -> dict[str, Any]:
@@ -566,6 +567,22 @@ class LayersFeatures:
                 cross_as_box or {},
                 get_otel_forward_baggage_from_config(self.context.config),
             )
+            incoming_overrides = (
+                cross_as_box.get("logging", {}).get("overrides")
+                if cross_as_box is not None
+                else None
+            )
+            if incoming_overrides is not None:
+                combined = Box(
+                    {
+                        **{k: v for k, v in combined.items() if k != "logging"},
+                        "logging": {
+                            **dict(combined.get("logging", {})),
+                            "overrides": incoming_overrides,
+                        },
+                    },
+                    default_box=True,
+                )
             return _call_with_optional_cross(
                 f, args_no_cross, kwargs_no_cross, combined
             )

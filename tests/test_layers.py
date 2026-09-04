@@ -4,7 +4,8 @@ import logging
 from types import SimpleNamespace
 from pydantic import BaseModel
 from box import Box
-from in_layers.core import CrossLayerProps
+from in_layers.core import CrossLayerProps, composite_logger
+from in_layers.core.libs import cross_layer_props_with_logging_overrides
 from in_layers.core.layers.features import create as create_features
 from in_layers.core.layers.features import _call_with_optional_cross
 from in_layers.core.entries import load_system, SystemProps
@@ -165,6 +166,359 @@ def test_wrapper_logs_emitted(caplog):
         assert ("Executing features function" in joined) or (
             "Executed features function" in joined
         )
+
+
+def test_nested_calls_respect_omit_data_override_on_next_hop():
+    collected: list[dict[str, Any]] = []
+
+    def method(_c):
+        def log_fn(msg):
+            collected.append(msg)  # type: ignore[arg-type]
+
+        return log_fn
+
+    class DemoServices:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+        def echo(self, x, cross_layer_props=None):
+            return "S:" + x
+
+    class DemoFeatures:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+        def innerFeature(self, x, cross_layer_props=None):
+            return "F2:" + x
+
+        def callFeatureWithOmit(self, x, cross_layer_props=None):
+            overrides = cross_layer_props_with_logging_overrides(
+                {"omit_data": True}, cross_layer_props=cross_layer_props
+            )
+            return self._ctx.features.get_features("demo").innerFeature(x, overrides)
+
+        def callServiceWithOmit(self, x, cross_layer_props=None):
+            overrides = cross_layer_props_with_logging_overrides(
+                {"omit_data": True}, cross_layer_props=cross_layer_props
+            )
+            return self._ctx.services.get_services("demo").echo(x, overrides)
+
+    def services_create(ctx):
+        return DemoServices(ctx)
+
+    def features_create(ctx):
+        return DemoFeatures(ctx)
+
+    class DemoDomain(Domain):
+        name = "demo"
+        services = SimpleNamespace(create=services_create)
+        features = SimpleNamespace(create=features_create)
+
+    config = Box(
+        system_name="test",
+        environment="test",
+        in_layers_core=Box(
+            logging=Box(
+                log_level=LogLevelNames.trace,
+                log_format=LogFormat.simple,
+                custom_logger=composite_logger([method]),
+            ),
+            layer_order=["services", "features"],
+            domains=[DemoDomain],
+        ),
+    )
+
+    sys = load_system(SystemProps(environment="test", config=config))
+
+    feature_result = sys.features.demo.callFeatureWithOmit("X")
+    service_result = sys.features.demo.callServiceWithOmit("Y")
+
+    assert feature_result == "F2:X"
+    assert service_result == "S:Y"
+
+    inner_feature_executing = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "demo:features:innerFeature"
+        and msg.get("message") == "Executing features function"
+    )
+    inner_feature_executed = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "demo:features:innerFeature"
+        and msg.get("message") == "Executed features function"
+    )
+    inner_service_executing = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "demo:services:echo"
+        and msg.get("message") == "Executing services function"
+    )
+    inner_service_executed = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "demo:services:echo"
+        and msg.get("message") == "Executed services function"
+    )
+
+    assert "args" not in inner_feature_executing
+    assert "result" not in inner_feature_executed
+    assert "args" not in inner_service_executing
+    assert "result" not in inner_service_executed
+
+
+def test_nested_calls_strip_omit_data_override_after_one_hop():
+    collected: list[dict[str, Any]] = []
+
+    def method(_c):
+        def log_fn(msg):
+            collected.append(msg)  # type: ignore[arg-type]
+
+        return log_fn
+
+    class DemoServices:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+        def echo(self, x, cross_layer_props=None):
+            return "S:" + x
+
+    class DemoFeatures:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+        def innerFeature(self, x, cross_layer_props=None):
+            return self._ctx.services.get_services("demo").echo(x, cross_layer_props)
+
+        def outerFeature(self, x, cross_layer_props=None):
+            overrides = cross_layer_props_with_logging_overrides(
+                {"omit_data": True}, cross_layer_props=cross_layer_props
+            )
+            return self._ctx.features.get_features("demo").innerFeature(x, overrides)
+
+    def services_create(ctx):
+        return DemoServices(ctx)
+
+    def features_create(ctx):
+        return DemoFeatures(ctx)
+
+    class DemoDomain(Domain):
+        name = "demo"
+        services = SimpleNamespace(create=services_create)
+        features = SimpleNamespace(create=features_create)
+
+    config = Box(
+        system_name="test",
+        environment="test",
+        in_layers_core=Box(
+            logging=Box(
+                log_level=LogLevelNames.trace,
+                log_format=LogFormat.simple,
+                custom_logger=composite_logger([method]),
+            ),
+            layer_order=["services", "features"],
+            domains=[DemoDomain],
+        ),
+    )
+
+    sys = load_system(SystemProps(environment="test", config=config))
+
+    result = sys.features.demo.outerFeature("X")
+
+    assert result == "S:X"
+
+    inner_feature_executing = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "demo:features:innerFeature"
+        and msg.get("message") == "Executing features function"
+    )
+    inner_feature_executed = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "demo:features:innerFeature"
+        and msg.get("message") == "Executed features function"
+    )
+    service_executing = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "demo:services:echo"
+        and msg.get("message") == "Executing services function"
+    )
+    service_executed = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "demo:services:echo"
+        and msg.get("message") == "Executed services function"
+    )
+
+    assert "args" not in inner_feature_executing
+    assert "result" not in inner_feature_executed
+    assert service_executing["args"] == ["X"]
+    assert service_executed["result"] == "S:X"
+
+
+def test_top_level_feature_and_nested_service_calls_both_respect_omit_data():
+    collected: list[dict[str, Any]] = []
+
+    def method(_c):
+        def log_fn(msg):
+            collected.append(msg)  # type: ignore[arg-type]
+
+        return log_fn
+
+    class DebugServices:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+        def test_logging(self, props, cross_layer_props=None):
+            return {"ok": True, "props": props}
+
+    class DebugFeatures:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+        def test_logging(self, props, cross_layer_props=None):
+            overrides = cross_layer_props_with_logging_overrides(
+                {"omit_data": True}, cross_layer_props=cross_layer_props
+            )
+            return self._ctx.services.debug.test_logging(props, overrides)
+
+    class DebugDomain(Domain):
+        name = "debug"
+        services = SimpleNamespace(create=lambda ctx: DebugServices(ctx))
+        features = SimpleNamespace(create=lambda ctx: DebugFeatures(ctx))
+
+    config = Box(
+        system_name="unit-test",
+        environment="unit-test",
+        in_layers_core=Box(
+            logging=Box(
+                log_level=LogLevelNames.trace,
+                log_format=LogFormat.simple,
+                custom_logger=composite_logger([method]),
+            ),
+            layer_order=["services", "features"],
+            domains=[DebugDomain],
+        ),
+    )
+
+    system = load_system(SystemProps(environment="unit-test", config=config))
+    overrides = cross_layer_props_with_logging_overrides({"omit_data": True})
+
+    result = system.features.debug.test_logging({}, overrides)
+
+    assert result == {"ok": True, "props": {}}
+
+    feature_executing = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "debug:features:test_logging"
+        and msg.get("message") == "Executing features function"
+    )
+    feature_executed = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "debug:features:test_logging"
+        and msg.get("message") == "Executed features function"
+    )
+    service_executing = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "debug:services:test_logging"
+        and msg.get("message") == "Executing services function"
+    )
+    service_executed = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "debug:services:test_logging"
+        and msg.get("message") == "Executed services function"
+    )
+
+    assert "args" not in feature_executing
+    assert "result" not in feature_executed
+    assert "args" not in service_executing
+    assert "result" not in service_executed
+
+
+def test_top_level_feature_omit_data_does_not_leak_to_service_without_readding():
+    collected: list[dict[str, Any]] = []
+
+    def method(_c):
+        def log_fn(msg):
+            collected.append(msg)  # type: ignore[arg-type]
+
+        return log_fn
+
+    class DebugServices:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+        def test_logging(self, props, cross_layer_props=None):
+            return {"ok": True, "props": props}
+
+    class DebugFeatures:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+        def test_logging(self, props, cross_layer_props=None):
+            return self._ctx.services.debug.test_logging(props, cross_layer_props)
+
+    class DebugDomain(Domain):
+        name = "debug"
+        services = SimpleNamespace(create=lambda ctx: DebugServices(ctx))
+        features = SimpleNamespace(create=lambda ctx: DebugFeatures(ctx))
+
+    config = Box(
+        system_name="unit-test",
+        environment="unit-test",
+        in_layers_core=Box(
+            logging=Box(
+                log_level=LogLevelNames.trace,
+                log_format=LogFormat.simple,
+                custom_logger=composite_logger([method]),
+            ),
+            layer_order=["services", "features"],
+            domains=[DebugDomain],
+        ),
+    )
+
+    system = load_system(SystemProps(environment="unit-test", config=config))
+    overrides = cross_layer_props_with_logging_overrides({"omit_data": True})
+
+    result = system.features.debug.test_logging({}, overrides)
+
+    assert result == {"ok": True, "props": {}}
+
+    feature_executing = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "debug:features:test_logging"
+        and msg.get("message") == "Executing features function"
+    )
+    feature_executed = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "debug:features:test_logging"
+        and msg.get("message") == "Executed features function"
+    )
+    service_executing = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "debug:services:test_logging"
+        and msg.get("message") == "Executing services function"
+    )
+    service_executed = next(
+        msg
+        for msg in collected
+        if msg.get("logger") == "debug:services:test_logging"
+        and msg.get("message") == "Executed services function"
+    )
+
+    assert "args" not in feature_executing
+    assert "result" not in feature_executed
+    assert service_executing["args"] == [{}]
+    assert service_executed["result"] == {"ok": True, "props": {}}
 
 
 def test_feature_callable_exposed():
