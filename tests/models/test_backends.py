@@ -467,6 +467,13 @@ def test_retrieve_missing_returns_none():
     assert be.retrieve(model, 999) is None
 
 
+def test_count_returns_bucket_size():
+    be, model = _mk_backend_and_model()
+    _insert(be, model, id=1, name="Alice")
+    _insert(be, model, id=2, name="Bob")
+    assert be.count(model) == 2
+
+
 def test_update_raises_when_missing():
     be, model = _mk_backend_and_model()
     with pytest.raises(KeyError):

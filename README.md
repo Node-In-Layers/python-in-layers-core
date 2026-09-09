@@ -9,9 +9,9 @@ Key points:
 - Layers are loaded in configured order (supports composite layers)
 - Cross-layer logging with automatic id propagation and function wraps
 
-# Pecularities, Limitations, and Recommendations
+## Pecularities, Limitations, and Recommendations
 
-## No Keyword Arguments for Layer level Functions
+### No Keyword Arguments for Layer level Functions
 For the public functions for a given layer, the arguments cannot use kwargs.
 The reason behind this is it creates a consistent interface to allow the framework and other tools to work.
 
@@ -275,6 +275,8 @@ poetry run pytest --cov=. --cov-report=term-missing --cov-report=html -q
 
 ### Overview
 - Models are standard Pydantic classes decorated with `@model(domain=..., plural_name=...)`.
+- Loaded systems expose discoverable models under:
+  - `system.models.<domain>.<PluralName>`
 - When a domain’s `services` layer is loaded, the framework discovers the domain’s models and exposes them as SimpleModel wrappers under:
   - `context.models.<domain>.get_models() -> Box`, keyed by the model’s plural name
   - Example access: `context.models.mydomain.get_models().MyModels`
@@ -378,6 +380,14 @@ class MyServices:
 from . import services, models
 name = "mydomain"
 __all__ = ['name', 'services', 'models']
+```
+
+### Using Models from the Loaded System
+```python
+system = load_system(SystemProps(environment="test", config=config))
+MyModels = system.models.mydomain.MyModels
+inst = MyModels.instance(id="123", name="John Doe")
+assert inst.get.id() == "123"
 ```
 
 ### Backends

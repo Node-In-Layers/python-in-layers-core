@@ -105,6 +105,10 @@ class MemoryBackend(BackendProtocol):
         limited = _apply_take(sorted_records, query.take)
         return Box(instances=[dict(x) for x in limited], page=query.page)
 
+    def count(self, model):
+        bucket = self.__get_bucket(model)
+        return len(bucket)
+
     def bulk_insert(self, model, data):
         for item in data:
             self.create(model, item)

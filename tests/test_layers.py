@@ -668,6 +668,95 @@ def test_layers_load_models_and_can_be_used_in_services():
     assert res.get.name() == "John Doe"
 
 
+def test_load_system_exposes_models_top_level():
+    @model(domain="mydomain", plural_name="MyModels")
+    class MyModel(BaseModel):
+        id: str
+        name: str
+
+    class MyServices:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+    class MyDomain(Domain):
+        name = "mydomain"
+        services = SimpleNamespace(create=MyServices)
+        models = SimpleNamespace(MyModel=MyModel)
+
+    config = Box(
+        system_name="test",
+        environment="test",
+        in_layers_core=Box(
+            logging=Box(
+                log_level=LogLevelNames.info,
+                log_format=LogFormat.simple,
+            ),
+            layer_order=["services", "features"],
+            domains=[MyDomain],
+        ),
+    )
+
+    sys = load_system(SystemProps(environment="test", config=config))
+    res = sys.models.mydomain.MyModels.instance(id="123", name="John Doe")
+
+    assert res.get.id() == "123"
+    assert res.get.name() == "John Doe"
+
+
+def test_custom_logger_context_includes_models_during_services_load():
+    captured_contexts: list[Any] = []
+
+    def sink(_ctx):
+        def log_fn(_msg):
+            return None
+
+        return log_fn
+
+    class CapturingLogger:
+        def get_logger(self, ctx, props=None):
+            captured_contexts.append(ctx)
+            return composite_logger([sink]).get_logger(ctx, props)
+
+    @model(domain="mydomain", plural_name="MyModels")
+    class MyModel(BaseModel):
+        id: str
+        name: str
+
+    class MyServices:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+    class MyDomain(Domain):
+        name = "mydomain"
+        services = SimpleNamespace(create=MyServices)
+        models = SimpleNamespace(MyModel=MyModel)
+
+    config = Box(
+        system_name="test",
+        environment="test",
+        in_layers_core=Box(
+            logging=Box(
+                log_level=LogLevelNames.info,
+                log_format=LogFormat.simple,
+                custom_logger=CapturingLogger(),
+            ),
+            layer_order=["services", "features"],
+            domains=[MyDomain],
+        ),
+    )
+
+    _ = load_system(SystemProps(environment="test", config=config))
+
+    models_context = next(
+        ctx
+        for ctx in captured_contexts
+        if getattr(getattr(ctx, "models", None), "mydomain", None) is not None
+    )
+
+    assert callable(models_context.models.mydomain.get_models)
+    assert models_context.models.mydomain.get_models().MyModels is not None
+
+
 def test_layers_uses_custom_model_backend():
     class MyFeature:
         def __init__(self, ctx):
@@ -696,6 +785,7 @@ def test_layers_uses_custom_model_backend():
                 update=lambda model, id, data: Box(id="123", name="John Doe"),
                 delete=lambda model, id: None,
                 search=lambda model, query: Box(instances=[], page=None),
+                count=lambda model: 0,
             )
 
     class AnotherDomain(Domain):
@@ -730,6 +820,7 @@ def test_layers_uses_custom_model_backend():
     res = sys.services.mydomain.cruds.MyModels.create(id="123", name="John Doe")
     assert res.id == "987"
     assert res.name == "John Doe"
+    assert sys.services.mydomain.cruds.MyModels.count() == 0
 
 
 def test_layers_puts_cruds_in_features():
@@ -776,6 +867,7 @@ def test_layers_puts_cruds_in_features():
     try:
         sys.features.mydomain.cruds.MyModels.create(id="123", name="John Doe")
         sys.features.mydomain.cruds.MyModels.retrieve("123")
+        sys.features.mydomain.cruds.MyModels.count()
         sys.features.mydomain.cruds.MyModels.update("123", name="Jane Doe")
         sys.features.mydomain.cruds.MyModels.delete("123")
         sys.features.mydomain.cruds.MyModels.search(

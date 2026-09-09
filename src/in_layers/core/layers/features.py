@@ -83,6 +83,9 @@ class _CrudsWrapper:
         page = getattr(res, "page", None)
         return Box(instances=instances, page=page)
 
+    def count(self) -> int:
+        return self._im.count()
+
     def bulk_insert(self, data: list[Mapping]) -> list[Mapping]:
         return self._im.bulk_insert(data)
 
@@ -111,6 +114,9 @@ class _FeatureCruds:
 
     def search(self, query):
         return self._base.search(query)
+
+    def count(self) -> int:
+        return self._base.count()
 
     def bulk_insert(self, data: list[Mapping]) -> list[Mapping]:
         return self._base.bulk_insert(data)
@@ -505,6 +511,7 @@ class LayersFeatures:
         self.context = context
         self._finalized_services_domains: Mapping[str, Any] = {}
         self._finalized_features_domains: Mapping[str, Any] = {}
+        self._finalized_models_domains: Mapping[str, Any] = {}
         ordered_layers: list[str] = []
         for layer in context.config.in_layers_core.layer_order:
             if isinstance(layer, list):
@@ -663,6 +670,12 @@ class LayersFeatures:
         simple_models_box = _build_in_layers_models_for_app(
             self, layer_context, discovered
         )
+        self._finalized_models_domains = Box(
+            {
+                **dict(self._finalized_models_domains),
+                app.name: simple_models_box,
+            }
+        )
 
         def get_models() -> Mapping[str, Any]:
             return simple_models_box
@@ -744,21 +757,21 @@ class LayersFeatures:
         visible_context = {
             k: v for k, v in dict(common_context).items() if k not in layers_to_remove
         }
-        layer_context1 = self._get_layer_context(visible_context, previous_layer)
-        layer_context1 = self._add_finalized_domain_getters(
-            layer_context1, current_layer
-        )
+        layer_context = self._get_layer_context(visible_context, previous_layer)
+        layer_context = self._add_finalized_domain_getters(layer_context, current_layer)
+
+        # If this is the services layer, attach model discovery helpers before
+        # building the logger so custom loggers can inspect models too.
+        if str(current_layer) == "services":
+            layer_context = self._inject_models_context(app, layer_context)
+
         layer_logger = (
-            self.context.root_logger.get_logger(Box(layer_context1))
+            self.context.root_logger.get_logger(Box(layer_context))
             .get_app_logger(app.name)
             .get_layer_logger(current_layer)
         )
-        layer_context = dict(layer_context1)
+        layer_context = dict(layer_context)
         layer_context["log"] = layer_logger
-
-        # If this is the services layer, attach model discovery helpers
-        if str(current_layer) == "services":
-            layer_context = self._inject_models_context(app, layer_context)
 
         logger_ids = layer_logger.get_ids()
         ignore_layer_functions = self.context.config.in_layers_core.logging.get(
@@ -858,6 +871,11 @@ class LayersFeatures:
                 previous_layer = layer_instance
         self._finalized_services_domains = Box(existing_layers.get("services", {}))
         self._finalized_features_domains = Box(existing_layers.get("features", {}))
+        if self._finalized_models_domains:
+            existing_layers = {
+                **dict(existing_layers),
+                "models": Box(self._finalized_models_domains),
+            }
         return Box(
             existing_layers,
         )

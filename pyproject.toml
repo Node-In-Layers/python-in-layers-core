@@ -1,6 +1,6 @@
 [project]
 name = "in-layers-core"
-version = "1.0.1"
+version = "1.0.2"
 description = "The Python port of Node in Layers Core."
 authors = [
     {name = "Mike Cornwell",email = "mike@mikecornwell.com"}

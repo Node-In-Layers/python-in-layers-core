@@ -140,6 +140,9 @@ class _InLayersModelImpl(InLayersModel):
         )
         return final_container
 
+    def count(self) -> int:
+        return self.__backend.count(self)
+
     def bulk_insert(self, data: list[Mapping]) -> None:
         self.__backend.bulk_insert(self, data)
 
@@ -225,6 +228,9 @@ def create_model_cruds(  # noqa: C901
             page=getattr(result, "page", None),
         )
 
+    def _default_count() -> int:
+        return _get_model().count()
+
     def _default_bulk_insert(data: list[Mapping]) -> None:
         _get_model().bulk_insert(data)
 
@@ -239,6 +245,7 @@ def create_model_cruds(  # noqa: C901
             "update": overrides.get("update") or _default_update,
             "delete": overrides.get("delete") or _default_delete,
             "search": overrides.get("search") or _default_search,
+            "count": overrides.get("count") or _default_count,
             "bulk_insert": overrides.get("bulk_insert") or _default_bulk_insert,
             "bulk_delete": overrides.get("bulk_delete") or _default_bulk_delete,
         }
