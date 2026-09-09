@@ -703,7 +703,7 @@ def test_load_system_exposes_models_top_level():
     assert res.get.name() == "John Doe"
 
 
-def test_custom_logger_context_includes_models_during_services_load():
+def test_custom_logger_context_includes_service_models_during_services_load():
     captured_contexts: list[Any] = []
 
     def sink(_ctx):

@@ -512,6 +512,7 @@ class LayersFeatures:
         self._finalized_services_domains: Mapping[str, Any] = {}
         self._finalized_features_domains: Mapping[str, Any] = {}
         self._finalized_models_domains: Mapping[str, Any] = {}
+        self._finalized_models_context: Mapping[str, Any] = {}
         ordered_layers: list[str] = []
         for layer in context.config.in_layers_core.layer_order:
             if isinstance(layer, list):
@@ -686,6 +687,7 @@ class LayersFeatures:
             "get_models": get_models,
             _INTERNAL_MODELS_KEY: simple_models_box,  # available for internal use
         }
+        self._finalized_models_context = Box(models_context)
         new_ctx = dict(layer_context)
         new_ctx["models"] = models_context
         return new_ctx
@@ -708,11 +710,7 @@ class LayersFeatures:
             }
             visible_context = self._add_finalized_domain_getters(visible_context, layer)
             layer_logger = (
-                self.context.root_logger.get_logger(
-                    Box(
-                        visible_context,
-                    )
-                )
+                self.context.root_logger.get_logger(Box(visible_context))
                 .get_app_logger(app.name)
                 .get_layer_logger(layer)
             )
@@ -859,6 +857,8 @@ class LayersFeatures:
                         new_context[layer_key] = merged_layer
                     else:
                         new_context[layer_key] = layer_value
+                if self._finalized_models_context:
+                    new_context["models"] = Box(self._finalized_models_context)
                 if "log" in new_context:
                     new_context = {k: v for k, v in new_context.items() if k != "log"}
                 existing_layers = new_context
